@@ -1,0 +1,38 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --foreground-rgb: 255, 255, 255;
+  --background-rgb: 17, 24, 39;
+}
+
+body {
+  color: rgb(var(--foreground-rgb));
+  background: rgb(var(--background-rgb));
+}
+
+/* Leaflet overrides for dark theme */
+.leaflet-container {
+  background: #1f2937;
+}
+
+.leaflet-popup-content-wrapper {
+  background: #374151;
+  color: white;
+  border-radius: 8px;
+}
+
+.leaflet-popup-tip {
+  background: #374151;
+}
+
+.leaflet-control-zoom a {
+  background: #374151 !important;
+  color: white !important;
+  border-color: #4b5563 !important;
+}
+
+.leaflet-control-zoom a:hover {
+  background: #4b5563 !important;
+}
