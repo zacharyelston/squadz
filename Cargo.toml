@@ -2,6 +2,10 @@
 members = ["backend"]
 resolver = "2"
 
+# Path to omni-core-lib (adjust if publishing to crates.io)
+[workspace.dependencies.omni-core-lib]
+path = "../windsurf-project/omni-core/omni-core-lib"
+
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
