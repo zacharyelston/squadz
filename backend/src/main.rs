@@ -3,7 +3,7 @@
 //! Built on omni-core patterns for secure, real-time location sharing.
 
 use std::sync::Arc;
-use axum::{Router, routing::{get, post, delete}};
+use axum::{Router, routing::{get, post, delete}, middleware};
 use tokio::sync::RwLock;
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::trace::TraceLayer;
@@ -17,12 +17,14 @@ mod services;
 use config::Config;
 use services::squad_manager::SquadManager;
 use services::location_store::LocationStore;
+use services::session::SessionStore;
 
 /// Application state shared across handlers
 pub struct AppState {
     pub config: Config,
     pub squad_manager: RwLock<SquadManager>,
     pub location_store: RwLock<LocationStore>,
+    pub session_store: SessionStore,
 }
 
 #[tokio::main]
@@ -47,22 +49,29 @@ async fn main() -> anyhow::Result<()> {
         config: config.clone(),
         squad_manager: RwLock::new(SquadManager::new()),
         location_store: RwLock::new(LocationStore::new()),
+        session_store: SessionStore::new(),
     });
 
-    // Build router
-    let app = Router::new()
-        // Health
+    // Protected routes (require auth)
+    let protected_routes = Router::new()
+        .route("/api/v1/locations", post(api::locations::update_location))
+        .route("/api/v1/squads/:squad_id/leave", post(api::squads::leave_squad))
+        .route("/api/v1/squads/:squad_id", delete(api::squads::delete_squad))
+        .layer(middleware::from_fn_with_state(state.clone(), services::auth::auth_middleware));
+
+    // Public routes (no auth required)
+    let public_routes = Router::new()
         .route("/api/v1/health", get(api::health::health_check))
-        // Squads
         .route("/api/v1/squads", post(api::squads::create_squad))
         .route("/api/v1/squads", get(api::squads::list_squads))
         .route("/api/v1/squads/:squad_id", get(api::squads::get_squad))
-        .route("/api/v1/squads/:squad_id", delete(api::squads::delete_squad))
         .route("/api/v1/squads/:squad_id/join", post(api::squads::join_squad))
-        .route("/api/v1/squads/:squad_id/leave", post(api::squads::leave_squad))
-        // Locations
-        .route("/api/v1/locations", post(api::locations::update_location))
-        .route("/api/v1/squads/:squad_id/locations", get(api::locations::get_squad_locations))
+        .route("/api/v1/squads/:squad_id/locations", get(api::locations::get_squad_locations));
+
+    // Build router
+    let app = Router::new()
+        .merge(protected_routes)
+        .merge(public_routes)
         // Middleware
         .layer(TraceLayer::new_for_http())
         .layer(

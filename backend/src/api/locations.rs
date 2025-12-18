@@ -2,31 +2,41 @@
 
 use std::sync::Arc;
 use axum::{
-    extract::{Path, State},
+    extract::{Path, State, Extension},
     http::StatusCode,
     Json,
 };
 use chrono::Utc;
 use uuid::Uuid;
 
-use crate::models::{SquadLocationsResponse, UpdateLocationRequest};
+use crate::models::{GeoPoint, SquadLocationsResponse};
+use crate::services::auth::AuthenticatedMember;
 use crate::AppState;
 
-/// Update a member's location
+/// Request to update location (simplified - uses session for member/squad)
+#[derive(Debug, serde::Deserialize)]
+pub struct AuthenticatedLocationUpdate {
+    pub location: GeoPoint,
+}
+
+/// Update a member's location (requires auth)
 pub async fn update_location(
     State(state): State<Arc<AppState>>,
-    Json(req): Json<UpdateLocationRequest>,
+    Extension(auth): Extension<AuthenticatedMember>,
+    Json(req): Json<AuthenticatedLocationUpdate>,
 ) -> Result<StatusCode, (StatusCode, String)> {
-    // Verify member is in the squad
+    let session = auth.session;
+    
+    // Get member display name from squad
     let manager = state.squad_manager.read().await;
     let squad = manager
-        .get_squad(&req.squad_id)
+        .get_squad(&session.squad_id)
         .ok_or((StatusCode::NOT_FOUND, "Squad not found".to_string()))?;
 
     let member = squad
         .members
         .iter()
-        .find(|m| m.member_id == req.member_id)
+        .find(|m| m.member_id == session.member_id)
         .ok_or((StatusCode::FORBIDDEN, "Not a member of this squad".to_string()))?;
 
     let display_name = member.display_name.clone();
@@ -34,7 +44,7 @@ pub async fn update_location(
 
     // Update location
     let mut store = state.location_store.write().await;
-    store.update_location(req.squad_id, req.member_id, display_name, req.location);
+    store.update_location(session.squad_id, session.member_id, display_name, req.location);
 
     Ok(StatusCode::OK)
 }

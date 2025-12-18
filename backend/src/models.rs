@@ -89,6 +89,8 @@ pub struct CreateSquadResponse {
     pub squad_id: Uuid,
     pub join_code: String,
     pub member_id: Uuid,
+    /// API key for authenticating future requests
+    pub api_key: String,
 }
 
 /// Request to join a squad
@@ -103,6 +105,8 @@ pub struct JoinSquadRequest {
 pub struct JoinSquadResponse {
     pub member_id: Uuid,
     pub squad: Squad,
+    /// API key for authenticating future requests
+    pub api_key: String,
 }
 
 /// Request to update location

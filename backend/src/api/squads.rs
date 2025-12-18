@@ -21,10 +21,14 @@ pub async fn create_squad(
     let mut manager = state.squad_manager.write().await;
     let (squad, member_id) = manager.create_squad(req.name, req.leader_name, req.settings);
 
+    // Create session for the leader (1 hour TTL)
+    let session = state.session_store.create(member_id, squad.squad_id, 3600);
+
     Ok(Json(CreateSquadResponse {
         squad_id: squad.squad_id,
         join_code: squad.join_code,
         member_id,
+        api_key: session.api_key,
     }))
 }
 
@@ -97,7 +101,9 @@ pub async fn join_squad(
     manager
         .join_squad(&req.join_code, req.display_name)
         .map(|(squad, member_id)| {
-            Json(JoinSquadResponse { member_id, squad })
+            // Create session for the new member (1 hour TTL)
+            let session = state.session_store.create(member_id, squad.squad_id, 3600);
+            Json(JoinSquadResponse { member_id, squad, api_key: session.api_key })
         })
         .map_err(|e| match e {
             SquadError::InvalidJoinCode => (StatusCode::NOT_FOUND, e.to_string()),
