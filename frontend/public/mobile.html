@@ -123,6 +123,7 @@
             <div class="status" id="status">Connecting...</div>
 
             <button class="danger" onclick="leaveSquad()">Leave Squad</button>
+            <button class="secondary" onclick="testCrypto()" style="margin-top: 0.5rem;">🔐 Test Crypto</button>
         </div>
     </div>
 
@@ -371,6 +372,108 @@
             el.textContent = msg;
             el.className = 'status ' + type;
         }
+
+        // ============================================
+        // OMNI-CORE-LITE: WebCrypto AES-256-GCM
+        // ============================================
+        
+        // Demo shared secret (must match server)
+        const DEMO_SECRET_STRING = 'omni-core-lite-demo-key-32bytes!';
+        let cryptoKey = null;
+
+        // Initialize crypto key from shared secret
+        async function initCrypto() {
+            const encoder = new TextEncoder();
+            const keyData = encoder.encode(DEMO_SECRET_STRING);
+            cryptoKey = await crypto.subtle.importKey(
+                'raw',
+                keyData,
+                { name: 'AES-GCM' },
+                false,
+                ['encrypt', 'decrypt']
+            );
+            console.log('[Crypto] AES-256-GCM key initialized');
+        }
+
+        // Encrypt plaintext using WebCrypto
+        async function encryptMessage(plaintext) {
+            if (!cryptoKey) await initCrypto();
+            
+            const encoder = new TextEncoder();
+            const data = encoder.encode(plaintext);
+            const nonce = crypto.getRandomValues(new Uint8Array(12));
+            
+            const ciphertext = await crypto.subtle.encrypt(
+                { name: 'AES-GCM', iv: nonce },
+                cryptoKey,
+                data
+            );
+            
+            return {
+                nonce: btoa(String.fromCharCode(...nonce)),
+                ciphertext: btoa(String.fromCharCode(...new Uint8Array(ciphertext)))
+            };
+        }
+
+        // Decrypt ciphertext using WebCrypto
+        async function decryptMessage(nonce, ciphertext) {
+            if (!cryptoKey) await initCrypto();
+            
+            const nonceBytes = Uint8Array.from(atob(nonce), c => c.charCodeAt(0));
+            const ciphertextBytes = Uint8Array.from(atob(ciphertext), c => c.charCodeAt(0));
+            
+            const plaintext = await crypto.subtle.decrypt(
+                { name: 'AES-GCM', iv: nonceBytes },
+                cryptoKey,
+                ciphertextBytes
+            );
+            
+            const decoder = new TextDecoder();
+            return decoder.decode(plaintext);
+        }
+
+        // Test crypto round-trip with server
+        async function testCrypto() {
+            try {
+                setStatus('Testing crypto...', 'active');
+                
+                // 1. Check server crypto health
+                const health = await api('/api/v1/crypto/health');
+                console.log('[Crypto] Server health:', health);
+                
+                // 2. Encrypt locally, send to server to decrypt
+                const testMsg = 'Hello from browser at ' + new Date().toISOString();
+                const encrypted = await encryptMessage(testMsg);
+                console.log('[Crypto] Encrypted locally:', encrypted);
+                
+                // 3. Server decrypts
+                const decrypted = await api('/api/v1/crypto/decrypt', {
+                    method: 'POST',
+                    body: JSON.stringify(encrypted)
+                });
+                console.log('[Crypto] Server decrypted:', decrypted);
+                
+                // 4. Server encrypts, we decrypt
+                const serverEncrypted = await api('/api/v1/crypto/encrypt', {
+                    method: 'POST',
+                    body: JSON.stringify({ plaintext: 'Hello from server!' })
+                });
+                console.log('[Crypto] Server encrypted:', serverEncrypted);
+                
+                const serverDecrypted = await decryptMessage(serverEncrypted.nonce, serverEncrypted.ciphertext);
+                console.log('[Crypto] Decrypted locally:', serverDecrypted);
+                
+                setStatus(`Crypto OK! Round-trip verified`, 'active');
+                alert(`Crypto test passed!\n\nSent: "${testMsg}"\nServer saw: "${decrypted.plaintext}"\n\nServer sent encrypted, we decrypted: "${serverDecrypted}"`);
+                
+            } catch (err) {
+                setStatus('Crypto test failed: ' + err.message, 'error');
+                console.error('[Crypto] Test failed:', err);
+            }
+        }
+
+        // Initialize crypto on load
+        initCrypto();
 
         // Initialize
         loadState();
