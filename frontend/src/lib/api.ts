@@ -8,26 +8,38 @@ import {
   GeoPoint,
 } from '@/types';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
+// Use relative URL to go through Next.js API proxy
+const API_URL = '';
 
 async function fetchApi<T>(
   endpoint: string,
   options?: RequestInit
 ): Promise<T> {
-  const res = await fetch(`${API_URL}${endpoint}`, {
-    ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      ...options?.headers,
-    },
-  });
+  const url = `${API_URL}${endpoint}`;
+  console.log(`[API] ${options?.method || 'GET'} ${url}`);
+  
+  try {
+    const res = await fetch(url, {
+      ...options,
+      headers: {
+        'Content-Type': 'application/json',
+        ...options?.headers,
+      },
+    });
 
-  if (!res.ok) {
-    const error = await res.text();
-    throw new Error(error || `HTTP ${res.status}`);
+    console.log(`[API] Response: ${res.status}`);
+
+    if (!res.ok) {
+      const error = await res.text();
+      console.error(`[API] Error: ${error}`);
+      throw new Error(error || `HTTP ${res.status}`);
+    }
+
+    return res.json();
+  } catch (err) {
+    console.error(`[API] Fetch error:`, err);
+    throw err;
   }
-
-  return res.json();
 }
 
 // Squad operations

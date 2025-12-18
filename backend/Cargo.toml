@@ -56,8 +56,5 @@ reqwest = { workspace = true }
 metrics = { workspace = true }
 metrics-exporter-prometheus = { workspace = true }
 
-# Omni-core library for crypto, sessions, and federation
-omni-core-lib = { workspace = true }
-
 [dev-dependencies]
 tempfile = "3.10"
