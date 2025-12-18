@@ -1,5 +1,6 @@
 //! API handlers for Squadz
 
+pub mod crypto;
 pub mod health;
-pub mod squads;
 pub mod locations;
+pub mod squads;

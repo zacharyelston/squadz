@@ -66,7 +66,12 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/v1/squads", get(api::squads::list_squads))
         .route("/api/v1/squads/:squad_id", get(api::squads::get_squad))
         .route("/api/v1/squads/:squad_id/join", post(api::squads::join_squad))
-        .route("/api/v1/squads/:squad_id/locations", get(api::locations::get_squad_locations));
+        .route("/api/v1/squads/:squad_id/locations", get(api::locations::get_squad_locations))
+        // Crypto test endpoints (omni-core-lite)
+        .route("/api/v1/crypto/health", get(api::crypto::crypto_health))
+        .route("/api/v1/crypto/echo", post(api::crypto::crypto_echo))
+        .route("/api/v1/crypto/encrypt", post(api::crypto::crypto_encrypt))
+        .route("/api/v1/crypto/decrypt", post(api::crypto::crypto_decrypt));
 
     // Build router
     let app = Router::new()
