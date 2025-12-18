@@ -25,6 +25,7 @@ pub struct AppState {
     pub squad_manager: RwLock<SquadManager>,
     pub location_store: RwLock<LocationStore>,
     pub session_store: SessionStore,
+    pub dashboard_password: String,
 }
 
 #[tokio::main]
@@ -44,12 +45,30 @@ async fn main() -> anyhow::Result<()> {
 
     info!("Starting Squadz server on {}:{}", config.host, config.port);
 
+    // Get or generate dashboard password
+    let dashboard_password = std::env::var("DASHBOARD_PASSWORD").unwrap_or_else(|_| {
+        let generated: String = (0..12)
+            .map(|_| {
+                let idx = rand::random::<usize>() % 36;
+                if idx < 10 {
+                    (b'0' + idx as u8) as char
+                } else {
+                    (b'a' + (idx - 10) as u8) as char
+                }
+            })
+            .collect();
+        info!("Generated dashboard password: {}", generated);
+        generated
+    });
+    info!("Dashboard available at / (password protected)");
+
     // Initialize state
     let state = Arc::new(AppState {
         config: config.clone(),
         squad_manager: RwLock::new(SquadManager::new()),
         location_store: RwLock::new(LocationStore::new()),
         session_store: SessionStore::new(),
+        dashboard_password,
     });
 
     // Protected routes (require auth)
@@ -61,6 +80,8 @@ async fn main() -> anyhow::Result<()> {
 
     // Public routes (no auth required)
     let public_routes = Router::new()
+        // Dashboard at root
+        .route("/", get(api::dashboard::dashboard_page))
         .route("/api/v1/health", get(api::health::health_check))
         .route("/api/v1/squads", post(api::squads::create_squad))
         .route("/api/v1/squads", get(api::squads::list_squads))
