@@ -1,4 +1,5 @@
-modules = ["rust-stable", "nodejs-20", "web"]
+modules = ["rust-stable", "nodejs-20", "web", "rust-1.83"]
+
 [agent]
 expertMode = true
 
@@ -35,9 +36,25 @@ waitForPort = 5000
 [workflows.workflow.metadata]
 outputType = "webview"
 
+[[workflows.workflow]]
+name = "Frontend"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "cd frontend && npm run dev"
+waitForPort = 3000
+
+[workflows.workflow.metadata]
+outputType = "webview"
+
 [[ports]]
 localPort = 5000
 externalPort = 80
+
+[[ports]]
+localPort = 3000
+externalPort = 3000
 
 [deployment]
 deploymentTarget = "autoscale"
