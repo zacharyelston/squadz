@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
+    <title>Squadz - GPS Tracker</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #1a1a2e; 
+            color: #eee;
+            min-height: 100vh;
+        }
+        .container { max-width: 100%; padding: 1rem; }
+        h1 { font-size: 1.5rem; text-align: center; margin-bottom: 1rem; color: #4ade80; }
+        .card { 
+            background: #16213e; 
+            border-radius: 12px; 
+            padding: 1rem; 
+            margin-bottom: 1rem;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+        }
+        input, button { 
+            width: 100%; 
+            padding: 0.75rem; 
+            margin: 0.25rem 0; 
+            border: none; 
+            border-radius: 8px; 
+            font-size: 1rem;
+        }
+        input { background: #0f3460; color: #fff; }
+        input::placeholder { color: #888; }
+        button { 
+            background: #4ade80; 
+            color: #000; 
+            font-weight: bold; 
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        button:hover { background: #22c55e; }
+        button:disabled { background: #555; color: #888; cursor: not-allowed; }
+        button.secondary { background: #3b82f6; color: #fff; }
+        button.danger { background: #ef4444; color: #fff; }
+        #map { height: 50vh; border-radius: 12px; margin-bottom: 1rem; }
+        .status { 
+            font-size: 0.85rem; 
+            color: #888; 
+            text-align: center; 
+            padding: 0.5rem;
+        }
+        .status.active { color: #4ade80; }
+        .status.error { color: #ef4444; }
+        .member-list { list-style: none; }
+        .member-list li { 
+            padding: 0.5rem; 
+            border-bottom: 1px solid #0f3460;
+            display: flex;
+            justify-content: space-between;
+        }
+        .member-list li:last-child { border-bottom: none; }
+        .stale { opacity: 0.5; }
+        .join-code { 
+            font-size: 2rem; 
+            font-weight: bold; 
+            text-align: center; 
+            color: #4ade80;
+            letter-spacing: 0.3rem;
+            padding: 1rem;
+            background: #0f3460;
+            border-radius: 8px;
+            margin: 0.5rem 0;
+        }
+        .hidden { display: none; }
+        .tabs { display: flex; gap: 0.5rem; margin-bottom: 1rem; }
+        .tabs button { flex: 1; }
+        .tabs button.active { background: #22c55e; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎯 Squadz</h1>
+
+        <!-- Auth Screen -->
+        <div id="auth-screen">
+            <div class="tabs">
+                <button id="tab-create" class="active" onclick="showTab('create')">Create Squad</button>
+                <button id="tab-join" onclick="showTab('join')">Join Squad</button>
+            </div>
+
+            <div id="create-form" class="card">
+                <input type="text" id="squad-name" placeholder="Squad Name" />
+                <input type="text" id="leader-name" placeholder="Your Name" />
+                <button onclick="createSquad()">Create Squad</button>
+            </div>
+
+            <div id="join-form" class="card hidden">
+                <input type="text" id="join-code" placeholder="Join Code (e.g. ABC123)" maxlength="6" style="text-transform: uppercase;" />
+                <input type="text" id="member-name" placeholder="Your Name" />
+                <button onclick="joinSquad()">Join Squad</button>
+            </div>
+        </div>
+
+        <!-- Map Screen -->
+        <div id="map-screen" class="hidden">
+            <div class="card">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <span id="squad-title">Squad</span>
+                    <span class="join-code" id="display-code" style="font-size: 1rem; padding: 0.25rem 0.5rem;">---</span>
+                </div>
+            </div>
+
+            <div id="map"></div>
+
+            <div class="card">
+                <h3 style="margin-bottom: 0.5rem;">Members</h3>
+                <ul class="member-list" id="member-list"></ul>
+            </div>
+
+            <div class="status" id="status">Connecting...</div>
+
+            <button class="danger" onclick="leaveSquad()">Leave Squad</button>
+        </div>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        // Configuration
+        const API_BASE = window.location.origin.includes('localhost') 
+            ? 'http://localhost:8081' 
+            : 'https://sqdz-s-dev.replit.app';
+        const UPDATE_INTERVAL = 10000; // 10 seconds
+
+        // State
+        let state = {
+            squadId: null,
+            memberId: null,
+            apiKey: null,
+            joinCode: null,
+            map: null,
+            markers: {},
+            watchId: null,
+            updateTimer: null
+        };
+
+        // Load state from localStorage
+        function loadState() {
+            const saved = localStorage.getItem('squadz_state');
+            if (saved) {
+                const parsed = JSON.parse(saved);
+                if (parsed.squadId && parsed.apiKey) {
+                    state = { ...state, ...parsed };
+                    showMapScreen();
+                    startTracking();
+                }
+            }
+        }
+
+        // Save state to localStorage
+        function saveState() {
+            localStorage.setItem('squadz_state', JSON.stringify({
+                squadId: state.squadId,
+                memberId: state.memberId,
+                apiKey: state.apiKey,
+                joinCode: state.joinCode
+            }));
+        }
+
+        // API calls
+        async function api(endpoint, options = {}) {
+            const headers = { 'Content-Type': 'application/json' };
+            if (state.apiKey) {
+                headers['Authorization'] = `Bearer ${state.apiKey}`;
+            }
+            const res = await fetch(`${API_BASE}${endpoint}`, { ...options, headers });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            if (res.status === 204) return null;
+            return res.json();
+        }
+
+        // Tab switching
+        function showTab(tab) {
+            document.getElementById('tab-create').classList.toggle('active', tab === 'create');
+            document.getElementById('tab-join').classList.toggle('active', tab === 'join');
+            document.getElementById('create-form').classList.toggle('hidden', tab !== 'create');
+            document.getElementById('join-form').classList.toggle('hidden', tab !== 'join');
+        }
+
+        // Create squad
+        async function createSquad() {
+            const name = document.getElementById('squad-name').value.trim();
+            const leaderName = document.getElementById('leader-name').value.trim();
+            if (!name || !leaderName) return alert('Please fill in all fields');
+
+            try {
+                const res = await api('/api/v1/squads', {
+                    method: 'POST',
+                    body: JSON.stringify({ name, leader_name: leaderName })
+                });
+                state.squadId = res.squad_id;
+                state.memberId = res.member_id;
+                state.apiKey = res.api_key;
+                state.joinCode = res.join_code;
+                saveState();
+                showMapScreen();
+                startTracking();
+            } catch (err) {
+                alert('Failed to create squad: ' + err.message);
+            }
+        }
+
+        // Join squad
+        async function joinSquad() {
+            const joinCode = document.getElementById('join-code').value.trim().toUpperCase();
+            const displayName = document.getElementById('member-name').value.trim();
+            if (!joinCode || !displayName) return alert('Please fill in all fields');
+
+            try {
+                // Find squad by code
+                const squads = await api('/api/v1/squads');
+                const squad = squads.find(s => s.join_code === joinCode);
+                if (!squad) return alert('Invalid join code');
+
+                const res = await api(`/api/v1/squads/${squad.squad_id}/join`, {
+                    method: 'POST',
+                    body: JSON.stringify({ join_code: joinCode, display_name: displayName })
+                });
+                state.squadId = squad.squad_id;
+                state.memberId = res.member_id;
+                state.apiKey = res.api_key;
+                state.joinCode = joinCode;
+                saveState();
+                showMapScreen();
+                startTracking();
+            } catch (err) {
+                alert('Failed to join squad: ' + err.message);
+            }
+        }
+
+        // Leave squad
+        async function leaveSquad() {
+            if (!confirm('Leave this squad?')) return;
+            stopTracking();
+            localStorage.removeItem('squadz_state');
+            state = { squadId: null, memberId: null, apiKey: null, joinCode: null, map: null, markers: {}, watchId: null, updateTimer: null };
+            document.getElementById('auth-screen').classList.remove('hidden');
+            document.getElementById('map-screen').classList.add('hidden');
+        }
+
+        // Show map screen
+        function showMapScreen() {
+            document.getElementById('auth-screen').classList.add('hidden');
+            document.getElementById('map-screen').classList.remove('hidden');
+            document.getElementById('display-code').textContent = state.joinCode || '---';
+
+            if (!state.map) {
+                state.map = L.map('map').setView([40.7128, -74.0060], 13);
+                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                    attribution: '© OpenStreetMap'
+                }).addTo(state.map);
+            }
+        }
+
+        // Start location tracking
+        function startTracking() {
+            setStatus('Starting GPS...', 'active');
+
+            // Watch position
+            if ('geolocation' in navigator) {
+                state.watchId = navigator.geolocation.watchPosition(
+                    pos => sendLocation(pos.coords),
+                    err => setStatus('GPS error: ' + err.message, 'error'),
+                    { enableHighAccuracy: true, maximumAge: 5000 }
+                );
+            }
+
+            // Poll for updates every 10 seconds
+            fetchLocations();
+            state.updateTimer = setInterval(fetchLocations, UPDATE_INTERVAL);
+        }
+
+        // Stop tracking
+        function stopTracking() {
+            if (state.watchId) navigator.geolocation.clearWatch(state.watchId);
+            if (state.updateTimer) clearInterval(state.updateTimer);
+        }
+
+        // Send location to server
+        async function sendLocation(coords) {
+            try {
+                await api('/api/v1/locations', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        location: {
+                            latitude: coords.latitude,
+                            longitude: coords.longitude,
+                            altitude: coords.altitude,
+                            accuracy: coords.accuracy,
+                            heading: coords.heading,
+                            speed: coords.speed
+                        }
+                    })
+                });
+                setStatus(`Updated ${new Date().toLocaleTimeString()}`, 'active');
+            } catch (err) {
+                setStatus('Update failed: ' + err.message, 'error');
+            }
+        }
+
+        // Fetch all member locations
+        async function fetchLocations() {
+            try {
+                const data = await api(`/api/v1/squads/${state.squadId}/locations`);
+                document.getElementById('squad-title').textContent = data.squad_name;
+                updateMap(data.locations);
+                updateMemberList(data.locations);
+            } catch (err) {
+                setStatus('Fetch failed: ' + err.message, 'error');
+            }
+        }
+
+        // Update map markers
+        function updateMap(locations) {
+            const bounds = [];
+            locations.forEach(loc => {
+                const latlng = [loc.location.latitude, loc.location.longitude];
+                bounds.push(latlng);
+
+                if (state.markers[loc.member_id]) {
+                    state.markers[loc.member_id].setLatLng(latlng);
+                } else {
+                    const marker = L.marker(latlng)
+                        .bindPopup(loc.display_name)
+                        .addTo(state.map);
+                    state.markers[loc.member_id] = marker;
+                }
+
+                // Highlight current user
+                if (loc.member_id === state.memberId) {
+                    state.markers[loc.member_id].setIcon(L.icon({
+                        iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-green.png',
+                        iconSize: [25, 41],
+                        iconAnchor: [12, 41],
+                        popupAnchor: [1, -34]
+                    }));
+                }
+            });
+
+            if (bounds.length > 0) {
+                state.map.fitBounds(bounds, { padding: [50, 50], maxZoom: 15 });
+            }
+        }
+
+        // Update member list
+        function updateMemberList(locations) {
+            const list = document.getElementById('member-list');
+            list.innerHTML = locations.map(loc => `
+                <li class="${loc.is_stale ? 'stale' : ''}">
+                    <span>${loc.display_name} ${loc.member_id === state.memberId ? '(you)' : ''}</span>
+                    <span>${loc.is_stale ? '⚠️ stale' : '✅'}</span>
+                </li>
+            `).join('');
+        }
+
+        // Set status message
+        function setStatus(msg, type = '') {
+            const el = document.getElementById('status');
+            el.textContent = msg;
+            el.className = 'status ' + type;
+        }
+
+        // Initialize
+        loadState();
+    </script>
+</body>
+</html>
