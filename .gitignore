@@ -30,3 +30,6 @@ build/
 # Generated TLS certificate
 /tls/
 /backend/tls/
+
+# TypeScript incremental build cache
+*.tsbuildinfo
