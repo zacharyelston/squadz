@@ -5,3 +5,4 @@ pub mod dashboard;
 pub mod health;
 pub mod locations;
 pub mod squads;
+pub mod webapp;

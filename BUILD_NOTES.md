@@ -31,6 +31,19 @@ The mobile app auto-detects environment:
 
 ---
 
+## Offline / mesh hosting
+
+`squadz-server` also serves the mobile app itself at `/mobile.html`, with Leaflet
+bundled and optional HTTPS, so it can run with no internet access on an
+OpenMANET node. See [deploy/openmanet/README.md](deploy/openmanet/README.md).
+
+```bash
+PORT=8090 TLS_PORT=8443 cargo run --bin squadz-server
+# then open https://localhost:8443/mobile.html
+```
+
+---
+
 ## Backend Configuration
 
 ### Environment Variables

@@ -5,6 +5,8 @@ WORKDIR /app
 # Copy workspace files
 COPY Cargo.toml Cargo.lock ./
 COPY backend ./backend
+# The mobile web app is compiled into the server binary
+COPY frontend/public ./frontend/public
 
 # Build release
 RUN cargo build --release --bin squadz-server
