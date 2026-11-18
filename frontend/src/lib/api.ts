@@ -56,16 +56,16 @@ export async function createSquad(
   });
 }
 
-export async function getSquad(squadId: string): Promise<Squad> {
+// The server never returns a join code here: only creating or joining does.
+export async function getSquad(squadId: string): Promise<Omit<Squad, 'join_code'>> {
   return fetchApi(`/api/v1/squads/${squadId}`);
 }
 
 export async function joinSquad(
-  squadId: string,
   joinCode: string,
   displayName: string
 ): Promise<JoinSquadResponse> {
-  return fetchApi(`/api/v1/squads/${squadId}/join`, {
+  return fetchApi('/api/v1/join', {
     method: 'POST',
     body: JSON.stringify({
       join_code: joinCode,
@@ -104,10 +104,4 @@ export async function getSquadLocations(
   squadId: string
 ): Promise<SquadLocationsResponse> {
   return fetchApi(`/api/v1/squads/${squadId}/locations`);
-}
-
-// Find squad by join code (searches all squads - in production would be a dedicated endpoint)
-export async function findSquadByCode(joinCode: string): Promise<Squad | null> {
-  const squads: Squad[] = await fetchApi('/api/v1/squads');
-  return squads.find((s) => s.join_code === joinCode) || null;
 }

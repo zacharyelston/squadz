@@ -42,6 +42,31 @@ pub struct Squad {
     pub settings: SquadSettings,
 }
 
+/// A squad as shown to callers who have not proved membership: everything
+/// except the join code, which is the only secret needed to get in.
+#[derive(Debug, Clone, Serialize)]
+pub struct PublicSquad {
+    pub squad_id: Uuid,
+    pub name: String,
+    pub created_at: DateTime<Utc>,
+    pub leader_id: Uuid,
+    pub members: Vec<Member>,
+    pub settings: SquadSettings,
+}
+
+impl From<&Squad> for PublicSquad {
+    fn from(s: &Squad) -> Self {
+        Self {
+            squad_id: s.squad_id,
+            name: s.name.clone(),
+            created_at: s.created_at,
+            leader_id: s.leader_id,
+            members: s.members.clone(),
+            settings: s.settings.clone(),
+        }
+    }
+}
+
 /// Squad configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SquadSettings {

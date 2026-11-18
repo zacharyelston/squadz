@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { findSquadByCode, joinSquad } from '@/lib/api';
+import { joinSquad } from '@/lib/api';
 import { Squad } from '@/types';
 
 interface Props {
@@ -21,14 +21,7 @@ export default function JoinSquad({ onJoined, onBack }: Props) {
     setLoading(true);
 
     try {
-      // Find squad by code
-      const squad = await findSquadByCode(joinCode.toUpperCase());
-      if (!squad) {
-        throw new Error('Invalid join code');
-      }
-
-      // Join the squad
-      const result = await joinSquad(squad.squad_id, joinCode.toUpperCase(), displayName);
+      const result = await joinSquad(joinCode.toUpperCase(), displayName);
       onJoined(result.squad, result.member_id);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to join squad');

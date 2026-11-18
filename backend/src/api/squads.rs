@@ -9,7 +9,7 @@ use axum::{
 use serde::Deserialize;
 use uuid::Uuid;
 
-use crate::models::{CreateSquadRequest, CreateSquadResponse, JoinSquadRequest, JoinSquadResponse, Squad};
+use crate::models::{CreateSquadRequest, CreateSquadResponse, JoinSquadRequest, JoinSquadResponse, PublicSquad};
 use crate::services::squad_manager::SquadError;
 use crate::AppState;
 
@@ -32,24 +32,24 @@ pub async fn create_squad(
     }))
 }
 
-/// List all squads (debug endpoint)
+/// List all squads (debug endpoint). Join codes are left out: this route is
+/// public, and the code is all it takes to join.
 pub async fn list_squads(
     State(state): State<Arc<AppState>>,
-) -> Json<Vec<Squad>> {
+) -> Json<Vec<PublicSquad>> {
     let manager = state.squad_manager.read().await;
-    Json(manager.list_squads().into_iter().cloned().collect())
+    Json(manager.list_squads().into_iter().map(PublicSquad::from).collect())
 }
 
-/// Get a squad by ID
+/// Get a squad by ID (public, so without its join code)
 pub async fn get_squad(
     State(state): State<Arc<AppState>>,
     Path(squad_id): Path<Uuid>,
-) -> Result<Json<Squad>, (StatusCode, String)> {
+) -> Result<Json<PublicSquad>, (StatusCode, String)> {
     let manager = state.squad_manager.read().await;
     manager
         .get_squad(&squad_id)
-        .cloned()
-        .map(Json)
+        .map(|s| Json(PublicSquad::from(s)))
         .ok_or((StatusCode::NOT_FOUND, "Squad not found".to_string()))
 }
 

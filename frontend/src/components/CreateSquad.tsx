@@ -23,7 +23,7 @@ export default function CreateSquad({ onCreated, onBack }: Props) {
     try {
       const result = await createSquad(squadName, displayName);
       const squad = await getSquad(result.squad_id);
-      onCreated(squad, result.member_id);
+      onCreated({ ...squad, join_code: result.join_code }, result.member_id);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create squad');
     } finally {
