@@ -1,104 +1,91 @@
-# Squadz - GPS Squad Tracking
+# Squadz
 
-Real-time GPS location sharing for squads/teams. Built on omni-core patterns.
+See where your squad is, with no internet needed.
 
-## Features
+One small server and a phone app. The server is built to run on a node of an OpenMANET Wi-Fi HaLow mesh; phones join a node's Wi-Fi and share positions through it.
 
-- **Create Squads** - Start a squad and get a 6-character join code
-- **Join Squads** - Enter a join code to join an existing squad
-- **Real-time Location** - Share your GPS location with squad members
-- **Interactive Map** - See all squad members on a Leaflet map
-- **Stale Detection** - Visual indication when a member's location is outdated
+- A phone joins by scanning a QR code. No accounts, no passwords.
+- After that the app only talks to the server whose key was in that code (pinned TLS 1.3), so there is no certificate to accept and nothing to impersonate.
+- Invites work once and expire after 10 minutes.
+- Map tiles can come from the server, and phones keep them, so the map works off-grid.
 
-## Architecture
+| Part | Where | Status |
+| --- | --- | --- |
+| Server (Go) | [`server/`](server) | Works; tested locally and over pinned TLS in tests |
+| iPhone app (SwiftUI) | [`ios/`](ios) | Works in the simulator; not yet run on a real phone |
+| Android app | | Not started. It will implement [`docs/MOBILE_CLIENT.md`](docs/MOBILE_CLIENT.md) |
+| Running on a mesh node | [`deploy/openmanet/`](deploy/openmanet/README.md) | Written, cross-compiles; not yet run on real hardware |
+
+Pairing, pinning, device keys and sessions come from **PairKit**, a kit shared with other apps. It has no published version yet, so check it out next to this repository:
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                      Frontend (Next.js)                      │
-│                         Port 3000                            │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐  │
-│  │ CreateSquad │  │  JoinSquad  │  │      SquadMap       │  │
-│  └─────────────┘  └─────────────┘  │  (Leaflet + React)  │  │
-│                                     └─────────────────────┘  │
-└─────────────────────────────────────────────────────────────┘
-                              │
-                              │ HTTP REST API
-                              ▼
-┌─────────────────────────────────────────────────────────────┐
-│                    Backend (Rust/Axum)                       │
-│                         Port 8080                            │
-│  ┌─────────────────┐  ┌─────────────────────────────────┐   │
-│  │  SquadManager   │  │       LocationStore             │   │
-│  │  - create/join  │  │  - update/query locations       │   │
-│  │  - leave/delete │  │  - TTL-based stale detection    │   │
-│  └─────────────────┘  └─────────────────────────────────┘   │
-└─────────────────────────────────────────────────────────────┘
+code/
+  pairkit/
+  squadz/
 ```
 
-## API Endpoints
+## Run it
 
-### Health
-- `GET /api/v1/health` - Health check
-
-### Squads
-- `POST /api/v1/squads` - Create a new squad
-- `GET /api/v1/squads` - List all squads
-- `GET /api/v1/squads/:id` - Get squad details
-- `DELETE /api/v1/squads/:id` - Delete a squad (leader only)
-- `POST /api/v1/squads/:id/join` - Join a squad
-- `POST /api/v1/squads/:id/leave` - Leave a squad
-
-### Locations
-- `POST /api/v1/locations` - Update member location
-- `GET /api/v1/squads/:id/locations` - Get all squad member locations
-
-## Development
-
-### Backend
+Server (Go 1.26+):
 
 ```bash
-cd backend
-cargo run
+cd server && go run .
 ```
 
-### Frontend
+It listens on `:8090` (plain HTTP: the operator's page, which shows a pairing code) and `:8443` (pinned TLS: everything the phones use), and keeps its key and state in `server/data/`.
+
+App (Xcode 16+, [XcodeGen](https://github.com/yonaskolb/XcodeGen)):
 
 ```bash
-cd frontend
-npm install
-npm run dev
+cd ios && xcodegen generate && open Squadz.xcodeproj
 ```
 
-### Docker
+Then, with the app running in the simulator:
+
+1. Type a name.
+2. Open `http://127.0.0.1:8090/` on the Mac. The simulator has no camera, so copy the text under the code. The server only accepts it once and for 10 minutes.
+3. Hand the code to the app as an invite link (pasting also works, after iOS asks you to allow it):
+
+   ```bash
+   xcrun simctl openurl booted "squadz://pair?c=$(pbpaste | base64 | tr '+/' '-_' | tr -d '=\n')"
+   ```
+
+4. Start a squad. **Invite** shows the code for the next phone.
+
+On a real phone, scan the code on the server's page instead, using the address the phone reaches the server by (not `127.0.0.1`).
+
+## Settings
+
+Environment variables for the server:
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `PORT` | `8090` | Plain HTTP: operator's page and health |
+| `TLS_PORT` | `8443` | Pinned TLS: the app's API and map tiles |
+| `TLS_HOSTS` | `localhost,127.0.0.1` | Names and addresses for the certificate. The first is used for the pairing code printed at startup |
+| `DATA_DIR` | `data` | TLS key, paired devices, squads. **Losing `tls-key.pem` unpairs every phone** |
+| `DASHBOARD_PASSWORD` | unset | Password for the operator's page (any user name). Unset means anyone who can reach it can pair |
+| `TILES_DIR` | unset | Folder of map tiles as `{z}/{x}/{y}.png` |
+| `TILE_MAX_ZOOM` | unset | Deepest zoom level in `TILES_DIR`; apps scale it up beyond that |
+| `TILE_ATTRIBUTION` | `© OpenStreetMap` | Credit shown on the map |
+| `LOCATION_TTL_SECS` | `300` | Seconds without a report before a member is shown as stale |
+| `MAX_SQUAD_SIZE` | `50` | Members per squad |
+
+## Tests
 
 ```bash
-docker-compose up --build
+cd server && go test ./...
 ```
 
-## Configuration
+```bash
+cd ios && xcodebuild -project Squadz.xcodeproj -scheme Squadz -destination 'platform=iOS Simulator,name=iPhone 18 Pro' test
+```
 
-### Backend Environment Variables
+## Known limits
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| HOST | 0.0.0.0 | Server bind address |
-| PORT | 8080 | Server port |
-| LOCATION_TTL_SECS | 300 | Location staleness threshold (5 min) |
-| MAX_SQUAD_SIZE | 50 | Maximum members per squad |
-
-### Frontend Environment Variables
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| NEXT_PUBLIC_API_URL | http://localhost:8080 | Backend API URL |
-
-## Tech Stack
-
-- **Backend**: Rust, Axum, Tokio
-- **Frontend**: Next.js 14, React 18, TypeScript, Tailwind CSS
-- **Map**: Leaflet, react-leaflet
-- **Patterns**: Based on omni-core architecture
-
-## License
-
-MIT
+- Positions are shared only while the app is open. Background reporting is the next milestone.
+- One server. If its node leaves the mesh, the squad stops updating until it is back.
+- Phones poll every 10 seconds; there is no push or streaming.
+- Squads and pairings survive a server restart; positions do not, and come back within a minute.
+- A phone holds one pairing at a time.
+- `.replit`, `replit.md` and `BUILD_NOTES.md` describe the earlier Rust and Next.js version, which this replaces.
