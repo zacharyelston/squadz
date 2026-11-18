@@ -52,6 +52,9 @@ rustls = { version = "0.23", default-features = false, features = ["ring", "std"
 rcgen = "0.13"
 time = "0.3"
 x509-parser = "0.16"
+
+# Invite QR codes (SVG only, so no image crates)
+qrcode = { version = "0.14", default-features = false, features = ["svg"] }
 getrandom = "0.2"
 
 # Config

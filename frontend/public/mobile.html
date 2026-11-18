@@ -81,6 +81,10 @@
         /* Own marker: default Leaflet pin shifted from blue to green */
         .leaflet-marker-icon.me-marker { filter: hue-rotate(270deg); }
         #map { background: #0f3460; }
+        #invite-card { text-align: center; }
+        #invite-qr { width: 240px; max-width: 80%; background: #fff; border-radius: 8px; padding: 8px; }
+        #invite-link { font-size: 0.8rem; color: #888; word-break: break-all; margin: 0.5rem 0; }
+        .notice { font-size: 0.9rem; color: #4ade80; text-align: center; margin-bottom: 0.5rem; }
     </style>
 </head>
 <body>
@@ -101,6 +105,7 @@
             </div>
 
             <div id="join-form" class="card hidden">
+                <div id="invite-notice" class="notice hidden">You were invited to a squad. Enter your name to join.</div>
                 <input type="text" id="join-code" placeholder="Join Code (e.g. ABC123)" maxlength="6" style="text-transform: uppercase;" />
                 <input type="text" id="member-name" placeholder="Your Name" />
                 <button onclick="joinSquad()">Join Squad</button>
@@ -125,7 +130,15 @@
 
             <div class="status" id="status">Connecting...</div>
 
-            <button class="danger" onclick="leaveSquad()">Leave Squad</button>
+            <button onclick="toggleInvite()">Invite (show QR code)</button>
+            <div id="invite-card" class="card hidden" style="margin-top: 0.5rem;">
+                <p style="margin-bottom: 0.5rem;">Scan with a phone camera to join</p>
+                <img id="invite-qr" alt="QR code that opens the join link for this squad" />
+                <div id="invite-link"></div>
+                <button class="secondary" onclick="copyInviteLink()">Copy link</button>
+            </div>
+
+            <button class="danger" onclick="leaveSquad()" style="margin-top: 0.5rem;">Leave Squad</button>
             <button class="secondary" onclick="testCrypto()" style="margin-top: 0.5rem;">🔐 Test Crypto</button>
         </div>
     </div>
@@ -235,16 +248,11 @@
             if (!joinCode || !displayName) return alert('Please fill in all fields');
 
             try {
-                // Find squad by code
-                const squads = await api('/api/v1/squads');
-                const squad = squads.find(s => s.join_code === joinCode);
-                if (!squad) return alert('Invalid join code');
-
-                const res = await api(`/api/v1/squads/${squad.squad_id}/join`, {
+                const res = await api('/api/v1/join', {
                     method: 'POST',
                     body: JSON.stringify({ join_code: joinCode, display_name: displayName })
                 });
-                state.squadId = squad.squad_id;
+                state.squadId = res.squad.squad_id;
                 state.memberId = res.member_id;
                 state.apiKey = res.api_key;
                 state.joinCode = joinCode;
@@ -252,7 +260,10 @@
                 showMapScreen();
                 startTracking();
             } catch (err) {
-                alert('Failed to join squad: ' + err.message);
+                const why = err.message === 'HTTP 404' ? 'that join code is not valid'
+                    : err.message === 'HTTP 409' ? 'that name is already taken in this squad'
+                    : err.message;
+                alert('Failed to join squad: ' + why);
             }
         }
 
@@ -264,6 +275,61 @@
             state = { squadId: null, memberId: null, apiKey: null, joinCode: null, map: null, markers: {}, watchId: null, updateTimer: null };
             document.getElementById('auth-screen').classList.remove('hidden');
             document.getElementById('map-screen').classList.add('hidden');
+            document.getElementById('invite-card').classList.add('hidden');
+        }
+
+        // ============================================
+        // Invites: a link (and QR code of it) that opens this page with the
+        // join code filled in. The code rides in the URL fragment.
+        // ============================================
+
+        function inviteLink() {
+            return `${window.location.origin}${window.location.pathname}#join=${encodeURIComponent(state.joinCode)}`;
+        }
+
+        function toggleInvite() {
+            const card = document.getElementById('invite-card');
+            if (!card.classList.toggle('hidden')) {
+                const link = inviteLink();
+                document.getElementById('invite-qr').src =
+                    `${API_BASE}/api/v1/qr.svg?data=${encodeURIComponent(link)}`;
+                document.getElementById('invite-link').textContent = link;
+            }
+        }
+
+        async function copyInviteLink() {
+            try {
+                await navigator.clipboard.writeText(inviteLink());
+                setStatus('Invite link copied', 'active');
+            } catch (err) {
+                setStatus('Could not copy - long-press the link instead', 'error');
+            }
+        }
+
+        // Join code from an invite link (#join=ABC123), or null
+        function invitedCode() {
+            const m = /^#join=([A-Za-z0-9]{4,12})$/.exec(window.location.hash);
+            return m ? m[1].toUpperCase() : null;
+        }
+
+        // Opened from an invite: show the join form with the code filled in.
+        // Returns true if the invite was taken up.
+        function applyInvite() {
+            const code = invitedCode();
+            if (!code) return false;
+            history.replaceState(null, '', window.location.pathname + window.location.search);
+
+            const saved = JSON.parse(localStorage.getItem('squadz_state') || 'null');
+            if (saved && saved.squadId) {
+                if (saved.joinCode === code) return false; // already in this squad
+                if (!confirm(`You are already in a squad. Leave it and join ${code}?`)) return false;
+                localStorage.removeItem('squadz_state');
+            }
+            showTab('join');
+            document.getElementById('join-code').value = code;
+            document.getElementById('invite-notice').classList.remove('hidden');
+            document.getElementById('member-name').focus();
+            return true;
         }
 
         // Show map screen
@@ -491,7 +557,7 @@
         if (window.isSecureContext) initCrypto();
 
         // Initialize
-        loadState();
+        if (!applyInvite()) loadState();
     </script>
 </body>
 </html>

@@ -112,6 +112,26 @@ pub async fn join_squad(
         })
 }
 
+/// Join a squad knowing only its join code (what an invite link or QR carries)
+pub async fn join_by_code(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<JoinSquadRequest>,
+) -> Result<Json<JoinSquadResponse>, (StatusCode, String)> {
+    let code = req.join_code.trim().to_uppercase();
+    let mut manager = state.squad_manager.write().await;
+    manager
+        .join_squad(&code, req.display_name)
+        .map(|(squad, member_id)| {
+            let session = state.session_store.create(member_id, squad.squad_id, 3600);
+            Json(JoinSquadResponse { member_id, squad, api_key: session.api_key })
+        })
+        .map_err(|e| match e {
+            SquadError::InvalidJoinCode => (StatusCode::NOT_FOUND, e.to_string()),
+            SquadError::NameTaken => (StatusCode::CONFLICT, e.to_string()),
+            _ => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+        })
+}
+
 /// Leave a squad
 #[derive(Deserialize)]
 pub struct LeaveSquadRequest {

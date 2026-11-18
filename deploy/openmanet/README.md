@@ -50,6 +50,14 @@ ssh $NODE '/etc/init.d/squadz enable && /etc/init.d/squadz start && logread -e s
 Phones on another node's access point reach the server across the mesh bridge.
 If they cannot, check the node's firewall zone for the `br-ahwlan` bridge.
 
+## Inviting people
+
+In the mobile app, **Invite (show QR code)** shows a QR code of a link like
+`https://<node>:8443/mobile.html#join=ABC123`. Another phone on the mesh scans
+it with its camera app, accepts the certificate warning the first time, enters a
+name and is in the squad. The link uses whatever address the inviting phone
+used to open the page, so it only works for phones that can reach that address.
+
 ## The certificate warning
 
 On first start the server writes a self-signed certificate to

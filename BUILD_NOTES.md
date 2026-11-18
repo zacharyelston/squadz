@@ -100,6 +100,8 @@ npm run dev
 - `GET /api/v1/squads` - List squads
 - `GET /api/v1/squads/:id` - Get squad
 - `POST /api/v1/squads/:id/join` - Join squad
+- `POST /api/v1/join` - Join squad by join code alone (used by invite links)
+- `GET /api/v1/qr.svg?data=<link>` - QR code (SVG) for an http(s) invite link
 - `GET /api/v1/squads/:id/locations` - Get locations
 
 ---
