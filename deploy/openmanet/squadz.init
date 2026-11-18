@@ -10,20 +10,17 @@ PROG=/usr/bin/squadz-server
 CONF=/etc/squadz/squadz.env
 
 start_service() {
-	mkdir -p /etc/squadz
+	mkdir -p /etc/squadz/data
+	chmod 700 /etc/squadz/data
 
 	procd_open_instance
 	procd_set_param command "$PROG"
 	# Defaults; anything in $CONF overrides them.
 	# 8080/8081 belong to the openmanetd web UI, so stay clear of those.
 	procd_set_param env \
-		HOST=0.0.0.0 \
 		PORT=8090 \
 		TLS_PORT=8443 \
-		TLS_CERT=/etc/squadz/cert.pem \
-		TLS_KEY=/etc/squadz/key.pem \
-		TILE_URL=none \
-		RUST_LOG=info
+		DATA_DIR=/etc/squadz/data
 	if [ -f "$CONF" ]; then
 		while IFS= read -r line; do
 			case "$line" in

@@ -1,101 +1,68 @@
 # Running Squadz on an OpenMANET node
 
-`squadz-server` carries the mobile web app and Leaflet inside the binary, so one
-file on one mesh node is enough for phones to share positions with no internet.
+`squadz-server` is one static binary. One file on one mesh node is enough for phones with the Squadz app to share positions with no internet.
 
-Status: the server and mobile page have been exercised locally on macOS. The
-cross-compile and on-node steps below have **not** been run against real
-hardware yet.
+Status: the server and the iPhone app have been exercised on a Mac and in the iOS simulator. The binary cross-compiles for the boards below, but nothing here has been run on real hardware or a real mesh yet.
 
 ## How it fits
 
-- OpenMANET nodes form one flat network in `10.41.0.0/16`. Phones join a node's
-  Wi-Fi access point and can reach any address on the mesh.
-- Run Squadz on one Raspberry Pi 4 / CM4 node. Give that node a predictable
-  address (`10.41.253.0/24` and `10.41.254.0/24` are outside the range
-  openmanetd auto-assigns) or use its `hostname.local` name.
-- Phones open `https://<node>:8443/mobile.html`. HTTPS is required: browsers
-  only allow GPS access on pages loaded over HTTPS.
-- Ports 8080 and 8081 on a node are taken by the openmanetd web UI, so Squadz
-  uses 8090 (HTTP: dashboard, health) and 8443 (HTTPS: mobile app and API).
+- OpenMANET nodes form one flat network in `10.41.0.0/16`. Phones join a node's Wi-Fi access point and can reach any address on the mesh.
+- Run Squadz on one node. Give it a predictable address (`10.41.253.0/24` and `10.41.254.0/24` are outside the range openmanetd auto-assigns) or use its `hostname.local` name.
+- Ports 8080 and 8081 on a node belong to the openmanetd web UI, so Squadz uses 8090 (plain HTTP: the operator's page) and 8443 (pinned TLS: the app).
 
-## Build (Pi 4 / CM4 / Pi 3 / Zero 2 W - all 64-bit ARM)
+## Build
 
-OpenWrt uses musl, so build a static musl binary. With
-[cargo-zigbuild](https://github.com/rust-cross/cargo-zigbuild):
+Go cross-compiles with no extra toolchain. From `server/`, with PairKit checked out next to this repository:
 
 ```bash
-rustup target add aarch64-unknown-linux-musl
-cargo zigbuild --release --target aarch64-unknown-linux-musl --bin squadz-server
+GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -ldflags="-s -w" -o squadz-server .
 ```
 
-The result is `target/aarch64-unknown-linux-musl/release/squadz-server`.
-[`cross`](https://github.com/cross-rs/cross) works the same way if you prefer
-Docker. The MIPS boards (HaLowLink2, Heltec HT-HD01) would need
-`mipsel-unknown-linux-musl` and have very little storage; they are not a
-sensible host.
+That covers the 64-bit ARM boards (Pi 4, CM4, Pi 3, Zero 2 W). For the MIPS boards (HaLowLink2, Heltec HT-HD01) use `GOARCH=mipsle GOMIPS=softfloat`; the binary is about 9 MB, which may not fit their storage.
 
 ## Install
 
 ```bash
 NODE=root@10.41.253.10
-scp -O target/aarch64-unknown-linux-musl/release/squadz-server $NODE:/usr/bin/
+scp -O server/squadz-server $NODE:/usr/bin/
 scp -O deploy/openmanet/squadz.init $NODE:/etc/init.d/squadz
 ssh $NODE 'mkdir -p /etc/squadz'
 scp -O deploy/openmanet/squadz.env.example $NODE:/etc/squadz/squadz.env
 ssh $NODE 'vi /etc/squadz/squadz.env'      # set TLS_HOSTS and DASHBOARD_PASSWORD
-ssh $NODE '/etc/init.d/squadz enable && /etc/init.d/squadz start && logread -e squadz | tail'
+ssh $NODE '/etc/init.d/squadz enable && /etc/init.d/squadz start && logread -e squadz | tail -40'
 ```
 
-Phones on another node's access point reach the server across the mesh bridge.
-If they cannot, check the node's firewall zone for the `br-ahwlan` bridge.
+Phones on another node's access point reach the server across the mesh bridge. If they cannot, check the node's firewall zone for the `br-ahwlan` bridge.
 
-## Inviting people
+## Pairing phones
 
-In the mobile app, **Invite (show QR code)** shows a QR code of a link like
-`https://<node>:8443/mobile.html#join=ABC123`. Another phone on the mesh scans
-it with its camera app, accepts the certificate warning the first time, enters a
-name and is in the squad. The link uses whatever address the inviting phone
-used to open the page, so it only works for phones that can reach that address.
+1. **The first phone.** Open `http://<node>:8090/` on any device on the mesh and scan the code it shows with the Squadz app. The code works once, for 10 minutes; reload the page for another. The code carries the address you opened the page with, so open it by an address phones can reach. The server also prints one code in its log at startup.
+2. **Everyone else.** A member taps **Invite** and shows their screen. Each invite is good for one phone.
 
-## The certificate warning
+The operator's page hands out pairing codes over plain HTTP. Set `DASHBOARD_PASSWORD` unless everyone on the mesh is welcome.
 
-On first start the server writes a self-signed certificate to
-`/etc/squadz/cert.pem` covering the names in `TLS_HOSTS`. Each phone shows a
-warning once and has to choose "proceed"/"visit this website". The certificate
-is valid for 820 days and is replaced automatically when it gets within 30 days
-of expiry. To use your own, put the PEM files at `TLS_CERT` / `TLS_KEY`.
+## The server's key
+
+On first start the server creates `/etc/squadz/data/tls-key.pem`. Every pairing code carries a pin of that key, and phones refuse any server that doesn't match it. There is no certificate to install or accept.
+
+- **Back the key up.** If it is lost or replaced, every phone refuses the server and has to be paired again.
+- Changing `TLS_HOSTS` or moving the node to a new address does not unpair anyone. Phones remember the address they paired with, though, so a phone paired at an old address has to be paired again at the new one.
 
 ## Offline map tiles
 
-With `TILE_URL=none` the map has no background. For a real basemap, copy a tile
-pyramid for your area to the node and point `TILES_DIR` at it:
+Copy a tile pyramid for your area to the node and point `TILES_DIR` at it:
 
 ```
 /etc/squadz/tiles/{z}/{x}/{y}.png
 ```
 
-Set `TILE_MAX_NATIVE_ZOOM` to the deepest zoom level you copied so closer zooms
-scale it up instead of going blank. Respect the tile source's usage policy when
-downloading; openstreetmap.org's own tile servers do not permit bulk download.
+Set `TILE_MAX_ZOOM` to the deepest level you copied; the app scales it up when zoomed in further. Phones fetch tiles as they look at the map and keep them, so each tile crosses the mesh once per phone. Respect the tile source's usage policy when downloading; openstreetmap.org's own tile servers do not permit bulk download.
 
-## Settings
-
-| Variable | Default | Meaning |
-|----------|---------|---------|
-| `PORT` | `8080` | HTTP port |
-| `TLS_PORT` | unset | HTTPS port; unset means HTTP only |
-| `TLS_CERT`, `TLS_KEY` | `tls/cert.pem`, `tls/key.pem` | PEM files, generated if missing |
-| `TLS_HOSTS` | `localhost,127.0.0.1` | Names/IPs for the generated certificate |
-| `TILES_DIR` | unset | Folder of `{z}/{x}/{y}.png` tiles served at `/tiles` |
-| `TILE_URL` | unset | Tile URL template; `none` for no basemap |
-| `TILE_MAX_NATIVE_ZOOM` | unset | Deepest zoom level available |
-| `TILE_ATTRIBUTION` | `© OpenStreetMap` | Attribution shown on the map |
+Without `TILES_DIR` the app falls back to the phone's own maps, which are blank without internet.
 
 ## Known limits
 
-- All state is in memory: restarting the service drops every squad.
-- One server: if its node leaves the mesh, the squad loses updates.
-- Each phone polls every 10 s, which adds up on a low-rate HaLow link.
-- Only `mobile.html` is offline-capable. The Next.js frontend still loads map
-  tiles from the internet.
+- One server: if its node leaves the mesh, the squad stops updating.
+- Each phone polls every 10 seconds, which adds up on a low-rate HaLow link.
+- Positions are only reported while the app is open.
+- Settings are listed in the top-level [README](../../README.md#settings).

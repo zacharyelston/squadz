@@ -33,3 +33,14 @@ build/
 
 # TypeScript incremental build cache
 *.tsbuildinfo
+
+# Server state (TLS key, paired devices, squads) and builds
+/data/
+/server/data/
+/server/squadz-server
+
+# Xcode (the project is generated: cd ios && xcodegen generate)
+*.xcodeproj
+DerivedData/
+ios/Squadz/Info.plist
+/server/server
