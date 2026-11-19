@@ -12,35 +12,58 @@ public enum SquadWire {
     }
 
     public static func encode(_ message: SquadMessage) throws -> Data {
+        frame(try json(message))
+    }
+
+    /// One message as JSON, without the length.
+    public static func json(_ message: SquadMessage, limit: Int = maxFrameBytes) throws -> Data {
         let json = try encoder.encode(message)
-        guard json.count <= maxFrameBytes else { throw WireError.frameTooLarge(json.count) }
-        var length = UInt32(json.count).bigEndian
+        guard json.count <= limit else { throw WireError.frameTooLarge(json.count) }
+        return json
+    }
+
+    public static func decode(_ json: Data) throws -> SquadMessage {
+        do {
+            return try decoder.decode(SquadMessage.self, from: json)
+        } catch {
+            throw WireError.undecodable(String(describing: error))
+        }
+    }
+
+    /// A 4-byte big-endian length, then the bytes.
+    public static func frame(_ payload: Data) -> Data {
+        var length = UInt32(payload.count).bigEndian
         var frame = Data(bytes: &length, count: 4)
-        frame.append(json)
+        frame.append(payload)
         return frame
     }
 
-    /// Accumulates bytes as they arrive and returns whole messages.
-    public struct FrameReader {
+    /// Accumulates bytes as they arrive and returns whole frames, without their lengths.
+    public struct RawReader {
         private var buffer = Data()
         public init() {}
 
-        public mutating func append(_ bytes: Data) throws -> [SquadMessage] {
+        public mutating func append(_ bytes: Data) throws -> [Data] {
             buffer.append(bytes)
-            var out: [SquadMessage] = []
+            var out: [Data] = []
             while buffer.count >= 4 {
                 let length = buffer.prefix(4).reduce(0) { $0 << 8 | Int($1) }
                 guard length <= maxFrameBytes else { buffer.removeAll(); throw WireError.frameTooLarge(length) }
                 guard buffer.count >= 4 + length else { break }
-                let json = buffer.dropFirst(4).prefix(length)
+                out.append(Data(buffer.dropFirst(4).prefix(length)))
                 buffer = Data(buffer.dropFirst(4 + length))
-                do {
-                    out.append(try decoder.decode(SquadMessage.self, from: Data(json)))
-                } catch {
-                    throw WireError.undecodable(String(describing: error))
-                }
             }
             return out
+        }
+    }
+
+    /// Accumulates bytes as they arrive and returns whole messages.
+    public struct FrameReader {
+        private var raw = RawReader()
+        public init() {}
+
+        public mutating func append(_ bytes: Data) throws -> [SquadMessage] {
+            try raw.append(bytes).map(SquadWire.decode)
         }
     }
 

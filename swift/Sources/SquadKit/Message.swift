@@ -23,6 +23,9 @@ public struct SquadMessage: Equatable, Sendable {
         /// The first frame on a link, for the transport: which key the sender holds. The core
         /// never sees it.
         case link(LinkProof)
+        /// The first frame each end sends on a link something else carries, like a relay: the
+        /// nonces the link's keys are made from. The core never sees it.
+        case seal(LinkSeal)
 
         // Member's phone → leader
         case hello(Hello)
@@ -68,6 +71,7 @@ extension SquadMessage: Codable {
     public var type: String {
         switch body {
         case .link: return "link"
+        case .seal: return "seal"
         case .enrolled: return "enrolled"
         case .leaderKey: return "leaderKey"
         case .hello: return "hello"
@@ -98,6 +102,7 @@ extension SquadMessage: Codable {
         switch body {
         case .bye: break
         case let .link(x): try c.encode(x, forKey: .body)
+        case let .seal(x): try c.encode(x, forKey: .body)
         case let .enrolled(x): try c.encode(x, forKey: .body)
         case let .leaderKey(x): try c.encode(x, forKey: .body)
         case let .hello(x): try c.encode(x, forKey: .body)
@@ -127,6 +132,7 @@ extension SquadMessage: Codable {
         func value<T: Decodable>(_: T.Type = T.self) throws -> T { try c.decode(T.self, forKey: .body) }
         switch type {
         case "link": body = .link(try value())
+        case "seal": body = .seal(try value())
         case "enrolled": body = .enrolled(try value())
         case "leaderKey": body = .leaderKey(try value())
         case "hello": body = .hello(try value())

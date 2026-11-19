@@ -6,7 +6,7 @@
     "key" : "84c1905b839799143fc54eac4c544e403c5cd6a824212a3a1bb2c1ca5bef796f"
   },
   "credentialID" : "6465666768696a6b6c6d6e6f70717273",
-  "enrolled" : "{\"credential\":{\"epoch\":3,\"id\":\"ZGVmZ2hpamtsbW5vcHFycw==\",\"issued\":1800000000000,\"key\":\"BLeePX3Po/ERgfRvJHr1bAZ7DvUyUPwY6b6Cwj5vgz/uiSRwQWN6hkQvRYt4pcQ5YLuszD6xTInlrpra9PeUVTA=\",\"sealed\":\"oKGio6SlpqeoqaqrVi0kFeXaS+l+ZFmspvpe8f/doaeoyBHh5CSwIV22BYs4p5Fp8XmqB5XD9jDATcVk\"},\"leader\":\"BHjvsP948IWkmmfxy5IlVKL1YlPzamUsUSwvBFWYblUbFsxc0FE7G4ovorJMtGVD7/QBgaRZMa3H8JQv13S14+g=\",\"member\":\"00000000-0000-4000-8000-000000000002\",\"name\":\"Red Squad\",\"role\":\"member\",\"signature\":\"ZDBLYSCqZ39gUUSi+SsLddQoq2U+1BmpE4zqann9DwIwoBIXQAJt/WOoUrz3VDDfuO2L7jNv9gljalKP0PqQHA==\",\"squad\":\"00000000-0000-4000-8000-000000000001\"}",
+  "enrolled" : "{\"credential\":{\"epoch\":3,\"id\":\"ZGVmZ2hpamtsbW5vcHFycw==\",\"issued\":1800000000000,\"key\":\"BLeePX3Po/ERgfRvJHr1bAZ7DvUyUPwY6b6Cwj5vgz/uiSRwQWN6hkQvRYt4pcQ5YLuszD6xTInlrpra9PeUVTA=\",\"sealed\":\"oKGio6SlpqeoqaqrVi0kFeXaS+l+ZFmspvpe8f/doaeoyBHh5CSwIV22BYs4p5Fp8XmqB5XD9jDATcVk\"},\"leader\":\"BHjvsP948IWkmmfxy5IlVKL1YlPzamUsUSwvBFWYblUbFsxc0FE7G4ovorJMtGVD7/QBgaRZMa3H8JQv13S14+g=\",\"member\":\"00000000-0000-4000-8000-000000000002\",\"name\":\"Red Squad\",\"role\":\"member\",\"signature\":\"gKlxNv9UvZa+2UVwiiCs8yFPWR0EcfrX8/gHOI1feNtZbeE0siLNilIRKcy5/PQAYdAfazpT2/IEuLpY/2tvGQ==\",\"squad\":\"00000000-0000-4000-8000-000000000001\"}",
   "epoch" : 3,
   "fingerprint" : "a9592102806752b805dea414d0929fd695f0effc497c39f504127c1b3603b89e",
   "hello" : "{\"device\":\"00000000-0000-4000-8000-000000000003\",\"key\":\"BM4Xbd0w3lu/uA8TH8+r+Rrq/eOvGNmVaenvE8wOlXFOcMDY0tiVhlB46D0saqBDi2JJqZHdceA5jBO5R8Xd864=\",\"name\":\"Ana\",\"nonce\":\"jI2Oj5CRkpOUlZaXmJmamw==\"}",
@@ -18,7 +18,7 @@
   },
   "inviteSecret" : "78797a7b7c7d7e7f8081828384858687",
   "inviteURL" : "squadz://join?v=1&squad=00000000-0000-4000-8000-000000000001&name=Red%20Squad&enrol=eHl6e3x9fn-AgYKDhIWGhw&cmd=qVkhAoBnUrgF3qQU0JKf1pXw7_xJfDn1BBJ8GzYDuJ4&tag=86a42775&exp=1800000000&by=Club%20iPad",
-  "leaderKeyChange" : "{\"key\":\"BEelGJ3O7+LRvduu5IbQeUCXQ/cMGgJzkTr5V0Af3WqA6oGbLsAf9d0SzjdEHHQVQNUA8EB01qIhO+uOq0IALBg=\",\"signature\":\"wqrYu4HsbRwZGDYCuyfUVUZE9I0/nKeZ3lDEKH0q8ethgvh+txeqTY4P+YPq12fT5JiefKicsXXxHPDnfPe6Bg==\",\"squad\":\"00000000-0000-4000-8000-000000000001\",\"time\":1800000000000}",
+  "leaderKeyChange" : "{\"key\":\"BEelGJ3O7+LRvduu5IbQeUCXQ/cMGgJzkTr5V0Af3WqA6oGbLsAf9d0SzjdEHHQVQNUA8EB01qIhO+uOq0IALBg=\",\"signature\":\"Dlif0YjXCJgifPuEmbx6a9o08YBnVck5XpMkqgZ+unf2hVyiIfpXiUZGJnlr9Xa3Iz52laoBJD5lnvNfeM40ug==\",\"squad\":\"00000000-0000-4000-8000-000000000001\",\"time\":1800000000000}",
   "memberLink" : {
     "identity" : "m:6465666768696a6b6c6d6e6f70717273",
     "key" : "2bf30c2621bd47a1d9ac9b78ba9dc100b5b284d7861929fdff069502781a435a"
@@ -27,6 +27,22 @@
   "memberProof" : "fd26798de633f8453eadfca0c1d4a7c110487a459b997cdb61a4754f08fe8b59",
   "memberSecret" : "be773e3c1841cae3d3fc914abe8bff147604284863e70e1c25a46c679297d1ce",
   "root" : "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20",
+  "sealed" : {
+    "deviceNonce" : "aaabacadaeafb0b1b2b3b4b5b6b7b8b9",
+    "fromDevice" : [
+      "77a8dc3abe56abf1f5455afa5bcde7cb37f4ff7be32e6b2d8fe306",
+      "d33a1c9a095fa6f9cee4c2e17ca1b8634ab89d64f6865b0dfae998ae"
+    ],
+    "fromLeader" : [
+      "4c0c5bed44b89f36853c3ae09417361370ffc143358eb2a793359e",
+      "8790dfb164ccef9616406ea26dc9cc26b599f6e46e57ae385ec5e36f"
+    ],
+    "leaderNonce" : "bebfc0c1c2c3c4c5c6c7c8c9cacbcccd",
+    "plain" : [
+      "first frame",
+      "second frame"
+    ]
+  },
   "squad" : "00000000-0000-4000-8000-000000000001",
   "tag" : "86a42775"
 }

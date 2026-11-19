@@ -31,6 +31,8 @@ enum Samples {
         let sealed = SealedCredential(id: bytes(1, 16), epoch: 0, issued: t, key: bytes(4, 65), sealed: bytes(5, 60))
         let all: [SquadMessage.Body] = [
             .link(LinkProof(id: "m:" + bytes(1, 16).hex, proof: bytes(2, 32))),
+            .seal(LinkSeal(id: "m:" + bytes(1, 16).hex, nonce: bytes(10, 16))),
+            .seal(LinkSeal(nonce: bytes(11, 16))),
             .hello(Hello(name: "Ana", device: uuid(3), nonce: bytes(3, 16), key: bytes(6, 65))),
             .hello(Hello(name: "Watcher", device: uuid(4), role: .observer, nonce: bytes(3, 16))),
             .enrolled(Enrolled(squad: squad.id, name: "Red", member: ana.id, role: .member, credential: sealed,
@@ -60,7 +62,7 @@ enum Samples {
         ]
         for body in all {
             switch body {   // exhaustive on purpose
-            case .link, .enrolled, .leaderKey, .hello, .bye, .position, .orderAck, .checkFire, .note, .fileOffer, .fileChunk, .fileDone,
+            case .link, .seal, .enrolled, .leaderKey, .hello, .bye, .position, .orderAck, .checkFire, .note, .fileOffer, .fileChunk, .fileDone,
                  .welcome, .observing, .refused, .status, .order, .receipt, .positions, .mission: break
             }
         }

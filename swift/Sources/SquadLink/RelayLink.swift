@@ -7,8 +7,9 @@ import SquadKit
 // SquadKit through a relay (docs/RELAY.md): for when a squad's devices aren't on one network.
 // Each device holds a WebSocket to the relay. The leader's device opens the squad's room; a
 // member's device opens a link into it; the relay passes the same frames the local link carries.
-// The leader's device still asks every link to prove its key, exactly as on the local network:
-// the relay's say-so lets a device knock, never in.
+// The leader's device still asks every link for its key, as on the local network: the relay's
+// say-so lets a device knock, never in. And every link is sealed between the two devices
+// (docs/WIRE.md, "Sealed links"), so the relay carries frames it can't read or change.
 
 enum RelayLink {
     static let away = "The leader's device isn't connected to the relay."

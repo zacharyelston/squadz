@@ -195,9 +195,14 @@ public final class SquadConnection {
 
     private let pipe: LinkPipe
     private let queue: DispatchQueue
-    private var reader = SquadWire.FrameReader()
+    private var reader = SquadWire.RawReader()
     private var seq = 0
     private var binding: Data?
+    /// A link through a relay is sealed end to end: the relay carries it and can't read it.
+    private var sealing: SealedLink?
+    private var nonce = Data()
+    /// The leader's side of a sealed link: the key the device named. It counts once a frame opens with it.
+    private var named: String?
     /// Connecting: the key to prove.
     private let key: LinkKey?
     /// What the first frame claims. Tests change it to claim a key the link wasn't made with.
@@ -267,18 +272,71 @@ public final class SquadConnection {
 
     /// - Parameter thenClose: closes the link once the message has gone.
     public func send(_ body: SquadMessage.Body, thenClose: Bool = false) {
+        guard isRelayed else { return write(body, thenClose: thenClose) }
+        // Nothing but the nonces goes through a relay unsealed.
+        guard sealing != nil else { return }
+        seq += 1
+        guard let json = try? SquadWire.json(SquadMessage(seq: seq, body: body), limit: SquadWire.maxFrameBytes - SealedLink.overhead),
+              let sealed = try? sealing?.seal(json) else { return }
+        pipe.send(SquadWire.frame(sealed), thenClose: thenClose)
+    }
+
+    private func write(_ body: SquadMessage.Body, thenClose: Bool = false) {
         seq += 1
         guard let frame = try? SquadWire.encode(SquadMessage(seq: seq, body: body)) else { return }
         pipe.send(frame, thenClose: thenClose)
     }
 
-    /// The pipe is up. A device says which key it holds; the leader's side waits to hear it.
+    /// The pipe is up. On the local network a device says which key it holds, and the leader's
+    /// side waits to hear it. Through a relay each end sends its nonce, and the link is sealed
+    /// once both have arrived.
     private func linked(_ binding: Data?) {
         guard let binding else { return fail("Couldn't secure the link.") }
         self.binding = binding
-        if let claim {
-            send(.link(LinkProof(id: claim.identity, proof: claim.proof(binding: binding))))
+        if isRelayed {
+            let mine = LinkSeal(id: claim?.identity)
+            nonce = mine.nonce
+            write(.seal(mine))
+        } else if let claim {
+            write(.link(LinkProof(id: claim.identity, proof: claim.proof(binding: binding))))
             set(.ready)
+        }
+    }
+
+    /// One frame, off the pipe.
+    private func take(_ frame: Data) throws {
+        guard isRelayed else { return deliver(try SquadWire.decode(frame)) }
+        guard sealing != nil else { return try seal(with: SquadWire.decode(frame)) }
+        guard let json = try? sealing?.open(frame) else {
+            // The device named a key it doesn't hold, or what carries the link changed a frame.
+            guard key == nil, identity == nil else { return fail("The link was tampered with, or the keys don't match.") }
+            set(.failed("A device connected without proving its key."))
+            return pipe.refuse()
+        }
+        let m = try SquadWire.decode(json)
+        if key == nil, identity == nil {
+            // The first frame that opens proves the device holds the key it named.
+            identity = named
+            set(.ready)
+        }
+        onMessage?(m)
+    }
+
+    /// The other end's nonce has arrived: make the link's keys.
+    private func seal(with m: SquadMessage) throws {
+        guard case let .seal(theirs) = m.body, let binding else { return fail("The link wasn't sealed.") }
+        if let key {
+            sealing = SealedLink(key: key, side: .device, carrier: binding, device: nonce, leader: theirs.nonce)
+            guard sealing != nil else { return fail("The link wasn't sealed.") }
+            set(.ready)
+        } else {
+            guard let id = theirs.id, let known = accepted[id],
+                  let made = SealedLink(key: known, side: .leader, carrier: binding, device: theirs.nonce, leader: nonce) else {
+                set(.failed("A device connected without proving its key."))
+                return pipe.refuse()
+            }
+            sealing = made
+            named = id
         }
     }
 
@@ -314,9 +372,9 @@ public final class SquadConnection {
 
     private func received(_ data: Data) {
         do {
-            for m in try reader.append(data) {
+            for frame in try reader.append(data) {
                 guard state == .connecting || state == .ready else { return }
-                deliver(m)
+                try take(frame)
             }
         } catch {
             fail("Bad data from \(peer): \(error)")

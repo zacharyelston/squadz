@@ -2,7 +2,7 @@
 
 What crosses between a squad's devices. SquadKit (`swift/Sources/SquadKit`) is the reference implementation; any other implementation (Android, a browser, a relay that needs to route) follows this document, must read and write every message in [`testdata/wire/messages.json`](../testdata/wire/messages.json) exactly, and must derive every value in [`testdata/join/vectors.json`](../testdata/join/vectors.json).
 
-Version 7 is the first version defined here. Versions up to 6 were BackyardBallistics' GroupKit, where golf messages and core messages shared one list and a shared join code was the only key. Nothing has shipped on version 7 yet, so joining by invite and credential (§7) was added to it without a new number.
+Version 7 is the first version defined here. Versions up to 6 were BackyardBallistics' GroupKit, where golf messages and core messages shared one list and a shared join code was the only key. Nothing has shipped on version 7 yet, so joining by invite and credential (§7) and sealed links (§9) were added to it without a new number.
 
 ## 1. Frames
 
@@ -12,7 +12,7 @@ A stream of frames. Each frame is a 4-byte big-endian length, then that many byt
 - A frame that isn't valid JSON, has an unknown `type`, or lacks a required field is refused and the link is closed.
 - Unknown fields are ignored.
 
-The transport under the frames is not part of this section: the local link is §8, and a relay is [RELAY.md](RELAY.md).
+The transport under the frames is not part of this section: the local link is §8, and a relay is [RELAY.md](RELAY.md). On a link that a relay carries, every frame after the first is sealed (§9): the bytes after the length are ciphertext, not JSON.
 
 ## 2. The envelope
 
@@ -52,7 +52,8 @@ SquadKit writes keys in sorted order so the same message is always the same byte
 | `type` | Body | Notes |
 | --- | --- | --- |
 | `link` | `id`, `proof` | The first frame on a link, for the transport: which key the device holds (§8). The squad's logic never sees it |
-| `hello` | `name`, `device`, `nonce`, `role`?, `key`? | The first message after `link`. `nonce` is 16 fresh random bytes. `key` is the device's one-time public key, sent on an invite link only. `role` is `member` (the default), `observer` or `contributor`; a squad refuses a contributor, and on a credential link the credential's role is what counts |
+| `seal` | `id`, `nonce` | The first frame on a link a relay carries, in place of `link` (§9). The squad's logic never sees it |
+| `hello` | `name`, `device`, `nonce`, `role`?, `key`? | The first message after `link` or `seal`. `nonce` is 16 fresh random bytes. `key` is the device's one-time public key, sent on an invite link only. `role` is `member` (the default), `observer` or `contributor`; a squad refuses a contributor, and on a credential link the credential's role is what counts |
 | `bye` | none | Leaving. The member stays on the roster |
 | `position` | `at`, `accuracy`, `time`, `heading`?, `member`? | `member` is ignored from a phone |
 | `orderAck` | `order`, `response` | `seen`, `done` or `cannot`. Counted only from someone the order was for |
@@ -66,6 +67,7 @@ SquadKit writes keys in sorted order so the same message is always the same byte
 
 | `type` | Body | Notes |
 | --- | --- | --- |
+| `seal` | `nonce` | The leader's first frame on a link a relay carries (§9) |
 | `enrolled` | `squad`, `name`, `role`, `credential`, `leader`, `signature`, `member`? | The answer to `hello` on an invite link (§7). The leader closes the link after it |
 | `leaderKey` | `squad`, `key`, `time`, `signature` | The leader's device has a new identity key, signed by the old one (§7) |
 | `welcome` | `member`, `squad` | The answer to `hello` on a member's credential link. The same credential is always the same `member` |
@@ -206,3 +208,45 @@ Every link has a **link key** and a name for it, which is the TLS pre-shared key
 - A device that has not connected within 8 seconds gives up that attempt. After a drop it retries with a delay that doubles from 1 second to 8. If the leader's device turns its credential down three times running without ever linking, it stops and says to ask for a new invite.
 
 What this does not protect against: someone who holds a member's device, or the leader's. And the six-character code is only as strong as six characters; use the QR code.
+
+## 9. Sealed links
+
+A link that something else carries, like a relay ([RELAY.md](RELAY.md)), is sealed between the device and the leader's device. Whatever carries it sees which key the device named and how long each frame is. It can't read a frame, and it can't change, drop, reorder, repeat or add one without the link ending.
+
+The local link (§8) is not sealed this way: its TLS session already runs between the two devices and nothing stands between them.
+
+**The first frame each way is in the clear**, an ordinary frame (§1, §2) of type `seal`, sent as soon as the link is open:
+
+- The device sends `id`, the name of the key it holds (the identities in §8's table), and `nonce`.
+- The leader's device sends `nonce`.
+
+Each `nonce` is 16 fresh random bytes. Neither end waits for the other's before sending its own.
+
+**The keys.** With `N` the value the carrier gave both ends for this link (a relay's 32 bytes):
+
+```
+both        = HKDF-SHA256(key: link key, salt: device nonce (16) + leader nonce (16), info: "squad sealed link v1" + N, 64 bytes)
+from device = the first 32 bytes
+from leader = the last 32 bytes
+```
+
+`N` is not trusted and is not what keeps the link safe: the two nonces are. A carrier that plays a recorded link back meets a new nonce from the other end, so nothing recorded opens.
+
+**Every frame after that** is a 4-byte big-endian length, then that many bytes:
+
+```
+AES-256-GCM(key: the sender's key, nonce: four zero bytes + the frame's count (8 bytes, big-endian), plaintext: the message's JSON, no additional data)
+  as ciphertext + tag (16)
+```
+
+- The count starts at 0 for each direction and goes up by one per frame. It is not sent.
+- The sealed bytes may be at most 1,048,576, so a message's JSON at most 1,048,560.
+- A frame that doesn't open ends the link.
+
+**Who the device is.** Nothing from a device counts until its first sealed frame opens: that it opens is the proof the device holds the key it named, so there is no `link` frame and no separate proof. If the leader's device doesn't hold a key by that name, or the first sealed frame doesn't open, it refuses the link. A device knows it has reached its leader when the leader's first sealed frame opens.
+
+An invite's link is sealed with the invite's link key, which comes from `enrol`. A relay is never shown `enrol` (it gets a value derived from it one way, [RELAY.md](RELAY.md)), so it can't read a request to join, answer one, or put its own in a device's place.
+
+The typed code is never used on a sealed link.
+
+[`testdata/join/vectors.json`](../testdata/join/vectors.json) has a sealed link's first two frames each way under `sealed`.

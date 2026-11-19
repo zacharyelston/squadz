@@ -12,6 +12,7 @@ final class RelayLinkTests: XCTestCase {
     static var process: Process?
     static var address: RelayAddress?
     static var folder: URL?
+    static var binary: URL?
     let queue = DispatchQueue(label: "relay-link-test")
 
     override class func setUp() {
@@ -20,6 +21,7 @@ final class RelayLinkTests: XCTestCase {
         let binary = ProcessInfo.processInfo.environment["SQUADZ_RELAY_BIN"].map(URL.init(fileURLWithPath:))
             ?? root.appendingPathComponent("relay/target/debug/squadz-relay")
         guard FileManager.default.isExecutableFile(atPath: binary.path) else { return }
+        self.binary = binary
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent("relay-test-\(UUID().uuidString)")
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         self.folder = folder
@@ -223,7 +225,113 @@ final class RelayLinkTests: XCTestCase {
         XCTFail("never happened: \(what)")
     }
 
+    /// Stands between devices and a relay and keeps every byte that passes, both ways: all a
+    /// relay that logs everything would have.
+    final class Tap {
+        private let listener: NWListener
+        private let queue = DispatchQueue(label: "relay-tap")
+        private var bytes = Data()
+        private var links: [NWConnection] = []
+
+        init(to relay: UInt16) throws {
+            listener = try NWListener(using: .tcp)
+            let ready = DispatchSemaphore(value: 0)
+            listener.stateUpdateHandler = { if case .ready = $0 { ready.signal() } }
+            listener.newConnectionHandler = { [unowned self] device in
+                let onward = NWConnection(host: "127.0.0.1", port: NWEndpoint.Port(rawValue: relay)!, using: .tcp)
+                self.links += [device, onward]
+                device.start(queue: self.queue)
+                onward.start(queue: self.queue)
+                self.pump(from: device, to: onward)
+                self.pump(from: onward, to: device)
+            }
+            listener.start(queue: queue)
+            _ = ready.wait(timeout: .now() + 5)
+        }
+
+        var port: UInt16 { listener.port?.rawValue ?? 0 }
+        var log: Data { queue.sync { bytes } }
+
+        private func pump(from a: NWConnection, to b: NWConnection) {
+            a.receive(minimumIncompleteLength: 1, maximumLength: 1 << 16) { [weak self] data, _, complete, error in
+                guard let self else { return }
+                if let data, !data.isEmpty {
+                    self.bytes.append(data)
+                    b.send(content: data, completion: .contentProcessed { _ in })
+                }
+                if complete || error != nil {
+                    a.cancel()
+                    b.cancel()
+                } else {
+                    self.pump(from: a, to: b)
+                }
+            }
+        }
+
+        func stop() {
+            listener.cancel()
+            queue.sync { links.forEach { $0.cancel() } }
+        }
+    }
+
     // MARK: Tests
+
+    /// Issue 2, V4: "a relay that logs everything logs no positions, names or notes." The relay
+    /// here runs without TLS so the tap in front of it sees what the relay itself sees. Bytes a
+    /// device sends are masked by WebSocket, but every frame the relay passes on leaves it
+    /// unmasked, so the log has each one in the clear if it ever was.
+    func testARelayThatLogsEverythingLogsNoNamesPositionsOrNotes() throws {
+        let relay = Process()
+        relay.executableURL = try XCTUnwrap(Self.binary)
+        relay.environment = ["RELAY_LISTEN": "127.0.0.1:0", "RELAY_DB": ":memory:"]
+        let out = Pipe()
+        relay.standardOutput = out
+        try relay.run()
+        addTeardownBlock { relay.terminate() }
+        // "listening on 127.0.0.1:PORT without TLS: ..."
+        var text = ""
+        while !text.contains("\n") {
+            let chunk = out.fileHandleForReading.availableData
+            if chunk.isEmpty { break }
+            text += String(decoding: chunk, as: UTF8.self)
+        }
+        let port = try XCTUnwrap(text.split(separator: " ").first { $0.hasPrefix("127.0.0.1:") }.flatMap { UInt16($0.dropFirst("127.0.0.1:".count)) })
+        let tap = try Tap(to: port)
+        addTeardownBlock { tap.stop() }
+        let address = RelayAddress(url: try XCTUnwrap(URL(string: "ws://127.0.0.1:\(tap.port)")))
+
+        let leader = try Leader(address: address, local: false, queue: queue)
+        open(leader.relay)
+        addTeardownBlock { [queue] in queue.sync { leader.relay.stop(endSquad: true) } }
+        var invite = leader.act { $0.openJoining(now: Date(), by: "Leader's iPad") }
+        invite.relay = address
+
+        let credential = try enrol(invite, name: "Anastasia").get()
+        let phone = client(credential, name: "Anastasia")
+        connect(phone)
+        XCTAssertTrue(queue.sync { phone.isRelayed })
+
+        let here = GeoPoint(latitude: 51.50741, longitude: -0.12783)
+        let ordered = expectation(description: "order arrived")
+        queue.sync {
+            phone.onMessage = { m in if case .order = m.body { ordered.fulfill() } }
+            phone.send(.position(MemberPosition(at: here, accuracy: 5, time: Date())))
+            phone.send(.note(FieldNote(author: "Anastasia", time: Date(), text: "Hedge by the old gate")))
+        }
+        eventually("the leader has her position") { leader.core.positions[credential.member!]?.at == here }
+        leader.command { $0.sendOrder(.note, text: "On me at the shed", now: Date()) }
+        wait(for: [ordered], timeout: 5)
+
+        let log = tap.log
+        XCTAssertGreaterThan(log.count, 2000)
+        XCTAssertNotNil(log.range(of: Data(#""type":"seal""#.utf8)), "the nonces cross in the clear, so this log would show anything else that did")
+        XCTAssertNotNil(log.range(of: Data(#""t":"open""#.utf8)), "the relay's own messages are in the log")
+        for word in ["Anastasia", leader.name, "Leader's iPad", "Hedge by the old gate", "On me at the shed", "51.50741", "0.12783",
+                     "hello", "welcome", "position", "enrolled", "status", credential.member!.raw.uuidString,
+                     credential.secret.base64EncodedString(), invite.enrol.base64URL] {
+            XCTAssertNil(log.range(of: Data(word.utf8)), "the relay saw \(word)")
+        }
+    }
 
     func testAPhoneJoinsAndLinksThroughTheRelay() throws {
         let leader = try leader()
@@ -319,13 +427,17 @@ final class RelayLinkTests: XCTestCase {
         let ana = try enrol(try invite(leader), name: "Ana").get()
         let ben = try enrol(try invite(leader), name: "Ben").get()
 
-        // Ben's ticket and Ben's key, claiming to be Ana.
+        // Ben's ticket and Ben's key, claiming to be Ana. The leader's device seals the link with
+        // Ana's key, so nothing Ben sends opens.
         let failed = expectation(description: "refused")
         failed.assertForOverFulfill = false
         var reason = ""
         let phone = SquadConnection(through: ben.relay!, squad: ben.squad, key: ben.linkKey, queue: queue)
         phone.claim = LinkKey(identity: ana.linkKey.identity, key: ben.linkKey.key)
-        phone.onState = { s in if case let .failed(why) = s { reason = why; failed.fulfill() } }
+        phone.onState = { s in
+            if s == .ready { phone.send(.hello(Hello(name: "Ana", device: UUID()))) }
+            if case let .failed(why) = s { reason = why; failed.fulfill() }
+        }
         queue.sync { phone.start() }
         wait(for: [failed], timeout: 5)
         XCTAssertTrue(reason.hasPrefix(SquadConnection.refusedKey), reason)

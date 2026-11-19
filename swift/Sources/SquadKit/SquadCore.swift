@@ -196,7 +196,7 @@ public struct SquadCore<M: Mission> {
             guard m.id == M.id, m.version == M.version else { return [] }
             let core = view
             return finish(mission.handle(m.payload, from: member, peer: peer, core: core, now: now), now: now)
-        case .hello, .link, .fileOffer, .fileChunk, .fileDone, .enrolled, .leaderKey, .welcome, .observing, .refused,
+        case .hello, .link, .seal, .fileOffer, .fileChunk, .fileDone, .enrolled, .leaderKey, .welcome, .observing, .refused,
              .status, .order, .receipt, .positions:
             return []   // the leader's own messages from a phone, or files (a squad doesn't take them): ignored
         }
