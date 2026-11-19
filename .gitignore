@@ -1,11 +1,8 @@
-# Rust
-/target/
-Cargo.lock
-
-# Node
-node_modules/
-.next/
-out/
+# Swift
+.build/
+.swiftpm/
+*.xcodeproj
+DerivedData/
 
 # Environment
 .env
@@ -21,8 +18,3 @@ out/
 
 # Logs
 *.log
-npm-debug.log*
-
-# Build
-dist/
-build/
