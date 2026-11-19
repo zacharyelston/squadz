@@ -211,23 +211,6 @@ pub async fn dashboard_page(
         .btn:hover {{ background: #2563eb; }}
         .btn-green {{ background: #4ade80; color: #000; }}
         .btn-green:hover {{ background: #22c55e; }}
-        .crypto-section {{
-            background: #16213e;
-            border-radius: 12px;
-            padding: 1.5rem;
-            margin-bottom: 2rem;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
-        }}
-        .crypto-section h3 {{ color: #fbbf24; margin-bottom: 1rem; }}
-        #crypto-result {{ 
-            background: #0f3460; 
-            padding: 1rem; 
-            border-radius: 8px; 
-            margin-top: 1rem;
-            font-family: monospace;
-            white-space: pre-wrap;
-            display: none;
-        }}
     </style>
 </head>
 <body>
@@ -252,53 +235,10 @@ pub async fn dashboard_page(
 
         <a href="?password={}" class="btn">🔄 Refresh</a>
         
-        <div class="crypto-section">
-            <h3>🔐 Omni-Core-Lite Crypto Test</h3>
-            <p>Test AES-256-GCM encryption round-trip with the server</p>
-            <button class="btn btn-green" onclick="testCrypto()">Run Crypto Test</button>
-            <div id="crypto-result"></div>
-        </div>
-
         <h2 style="margin-bottom: 1rem;">Squads</h2>
         {}
     </div>
-    
-    <script>
-        async function testCrypto() {{
-            const result = document.getElementById('crypto-result');
-            result.style.display = 'block';
-            result.textContent = 'Testing crypto...';
-            
-            try {{
-                // Test health
-                const health = await fetch('/api/v1/crypto/health').then(r => r.json());
-                
-                // Test encrypt
-                const encrypted = await fetch('/api/v1/crypto/encrypt', {{
-                    method: 'POST',
-                    headers: {{ 'Content-Type': 'application/json' }},
-                    body: JSON.stringify({{ plaintext: 'Hello from dashboard at ' + new Date().toISOString() }})
-                }}).then(r => r.json());
-                
-                // Test decrypt
-                const decrypted = await fetch('/api/v1/crypto/decrypt', {{
-                    method: 'POST',
-                    headers: {{ 'Content-Type': 'application/json' }},
-                    body: JSON.stringify({{ nonce: encrypted.nonce, ciphertext: encrypted.ciphertext }})
-                }}).then(r => r.json());
-                
-                result.textContent = `✅ Crypto Test PASSED!
 
-Health: ${{JSON.stringify(health, null, 2)}}
-
-Encrypted: ${{JSON.stringify(encrypted, null, 2)}}
-
-Decrypted: ${{JSON.stringify(decrypted, null, 2)}}`;
-            }} catch (err) {{
-                result.textContent = '❌ Crypto Test FAILED: ' + err.message;
-            }}
-        }}
-    </script>
 </body>
 </html>"##,
         squads.len(),

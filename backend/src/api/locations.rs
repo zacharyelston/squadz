@@ -49,16 +49,27 @@ pub async fn update_location(
     Ok(StatusCode::OK)
 }
 
-/// Get all member locations for a squad
+/// Get all member locations for a squad (requires auth as a member of it)
 pub async fn get_squad_locations(
     State(state): State<Arc<AppState>>,
+    Extension(auth): Extension<AuthenticatedMember>,
     Path(squad_id): Path<Uuid>,
 ) -> Result<Json<SquadLocationsResponse>, (StatusCode, String)> {
+    // A session is tied to one squad; it does not open any other squad's map.
+    if auth.session.squad_id != squad_id {
+        return Err((StatusCode::FORBIDDEN, "Not a member of this squad".to_string()));
+    }
+
     // Get squad info
     let manager = state.squad_manager.read().await;
     let squad = manager
         .get_squad(&squad_id)
         .ok_or((StatusCode::NOT_FOUND, "Squad not found".to_string()))?;
+
+    // Leaving a squad does not end the session, so check membership too.
+    if !squad.members.iter().any(|m| m.member_id == auth.session.member_id) {
+        return Err((StatusCode::FORBIDDEN, "Not a member of this squad".to_string()));
+    }
 
     let squad_name = squad.name.clone();
     drop(manager);

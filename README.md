@@ -42,7 +42,6 @@ Real-time GPS location sharing for squads/teams. Built on omni-core patterns.
 
 ### Squads
 - `POST /api/v1/squads` - Create a new squad
-- `GET /api/v1/squads` - List all squads
 - `GET /api/v1/squads/:id` - Get squad details
 - `DELETE /api/v1/squads/:id` - Delete a squad (leader only)
 - `POST /api/v1/squads/:id/join` - Join a squad
@@ -50,7 +49,7 @@ Real-time GPS location sharing for squads/teams. Built on omni-core patterns.
 
 ### Locations
 - `POST /api/v1/locations` - Update member location
-- `GET /api/v1/squads/:id/locations` - Get all squad member locations
+- `GET /api/v1/squads/:id/locations` - Get all squad member locations (auth required, members only)
 
 ## Development
 

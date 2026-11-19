@@ -32,15 +32,6 @@ pub async fn create_squad(
     }))
 }
 
-/// List all squads (debug endpoint). Join codes are left out: this route is
-/// public, and the code is all it takes to join.
-pub async fn list_squads(
-    State(state): State<Arc<AppState>>,
-) -> Json<Vec<PublicSquad>> {
-    let manager = state.squad_manager.read().await;
-    Json(manager.list_squads().into_iter().map(PublicSquad::from).collect())
-}
-
 /// Get a squad by ID (public, so without its join code)
 pub async fn get_squad(
     State(state): State<Arc<AppState>>,

@@ -11,6 +11,10 @@ import {
 // Use relative URL to go through Next.js API proxy
 const API_URL = '';
 
+// The member's session key, returned by creating or joining a squad. It is
+// held in memory only, like the rest of this page's squad state.
+let apiKey: string | null = null;
+
 async function fetchApi<T>(
   endpoint: string,
   options?: RequestInit
@@ -23,6 +27,7 @@ async function fetchApi<T>(
       ...options,
       headers: {
         'Content-Type': 'application/json',
+        ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
         ...options?.headers,
       },
     });
@@ -35,7 +40,9 @@ async function fetchApi<T>(
       throw new Error(error || `HTTP ${res.status}`);
     }
 
-    return res.json();
+    // Some endpoints (e.g. POST /locations) reply 200 with an empty body
+    const text = await res.text();
+    return (text ? JSON.parse(text) : undefined) as T;
   } catch (err) {
     console.error(`[API] Fetch error:`, err);
     throw err;
@@ -47,13 +54,15 @@ export async function createSquad(
   name: string,
   leaderName: string
 ): Promise<CreateSquadResponse> {
-  return fetchApi('/api/v1/squads', {
+  const result = await fetchApi<CreateSquadResponse>('/api/v1/squads', {
     method: 'POST',
     body: JSON.stringify({
       name,
       leader_name: leaderName,
     }),
   });
+  apiKey = result.api_key;
+  return result;
 }
 
 // The server never returns a join code here: only creating or joining does.
@@ -65,13 +74,15 @@ export async function joinSquad(
   joinCode: string,
   displayName: string
 ): Promise<JoinSquadResponse> {
-  return fetchApi('/api/v1/join', {
+  const result = await fetchApi<JoinSquadResponse>('/api/v1/join', {
     method: 'POST',
     body: JSON.stringify({
       join_code: joinCode,
       display_name: displayName,
     }),
   });
+  apiKey = result.api_key;
+  return result;
 }
 
 export async function leaveSquad(
@@ -82,6 +93,7 @@ export async function leaveSquad(
     method: 'POST',
     body: JSON.stringify({ member_id: memberId }),
   });
+  apiKey = null;
 }
 
 // Location operations

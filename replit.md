@@ -43,7 +43,6 @@ Squadz is a real-time GPS squad tracking application with a Rust backend and Nex
 
 ### Squads
 - `POST /api/v1/squads` - Create a squad (returns api_key)
-- `GET /api/v1/squads` - List all squads
 - `GET /api/v1/squads/:squad_id` - Get squad details
 - `POST /api/v1/squads/:squad_id/join` - Join a squad (returns api_key)
 - `POST /api/v1/squads/:squad_id/leave` - Leave a squad (auth required)
@@ -51,7 +50,7 @@ Squadz is a real-time GPS squad tracking application with a Rust backend and Nex
 
 ### Locations
 - `POST /api/v1/locations` - Update location (auth required)
-- `GET /api/v1/squads/:squad_id/locations` - Get squad member locations
+- `GET /api/v1/squads/:squad_id/locations` - Get squad member locations (auth required, members only)
 
 ## Authentication
 

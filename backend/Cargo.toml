@@ -44,7 +44,6 @@ x25519-dalek = { workspace = true }
 chacha20poly1305 = { workspace = true }
 ed25519-dalek = { workspace = true }
 hex = { workspace = true }
-aes-gcm = "0.10"
 
 # TLS (ring provider: no cmake/aws-lc needed when cross-compiling)
 axum-server = { version = "0.7", default-features = false, features = ["tls-rustls-no-provider"] }

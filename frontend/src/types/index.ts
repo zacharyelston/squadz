@@ -47,11 +47,13 @@ export interface CreateSquadResponse {
   squad_id: string;
   join_code: string;
   member_id: string;
+  api_key: string;
 }
 
 export interface JoinSquadResponse {
   member_id: string;
   squad: Squad;
+  api_key: string;
 }
 
 export interface SquadLocationsResponse {
