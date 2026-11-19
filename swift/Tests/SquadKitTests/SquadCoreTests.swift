@@ -76,6 +76,33 @@ final class SquadCoreTests: XCTestCase {
         XCTAssertTrue(y.has("Cam") { if case .refused = $0 { return true }; return false })
     }
 
+    func testMembersSeeEachOtherOnlyWhenTheLeaderSharesPositions() throws {
+        func positions(_ y: Yard<NoMission>, _ name: String) -> [MemberID] {
+            y.got[name, default: []].flatMap { body -> [MemberID] in
+                if case let .positions(r) = body { return r.positions.compactMap(\.member) } else { return [] }
+            }
+        }
+        let quiet = Yard(mission: NoMission())
+        quiet.join("Ana"); quiet.join("Ben")
+        quiet.send("Ana", .position(MemberPosition(at: origin, accuracy: 3, time: quiet.now)))
+        XCTAssertTrue(positions(quiet, "Ben").isEmpty)
+
+        let y = Yard(mission: NoMission())
+        y.host.sharesPositions = true
+        let ana = try XCTUnwrap(y.join("Ana")), ben = try XCTUnwrap(y.join("Ben"))
+        y.send("Ana", .position(MemberPosition(member: ben, at: origin, accuracy: 3, time: y.now)))
+        XCTAssertEqual(positions(y, "Ben"), [ana], "from Ana's link, so it is Ana's, whatever it says")
+        XCTAssertTrue(positions(y, "Ana").isEmpty, "not echoed to the sender")
+        // Someone who connects later gets what is already known, except their own.
+        y.send("Ben", .position(MemberPosition(at: origin, accuracy: 3, time: y.now)))
+        let cy = try XCTUnwrap(y.join("Cy"))
+        XCTAssertEqual(Set(positions(y, "Cy")), [ana, ben])
+        y.send("Cy", .bye)
+        y.got["Cy"] = []
+        y.send("Cy", .position(MemberPosition(at: origin, accuracy: 3, time: y.now)))   // not connected: ignored
+        XCTAssertNil(y.host.positions[cy])
+    }
+
     func testOtherProtocolVersionsAreRefused() {
         var host = SquadCore(squad: Squad(name: "Red"), mission: NoMission())
         let out = host.handle(SquadMessage(protocolVersion: SquadProtocol.version + 1, seq: 1,

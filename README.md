@@ -4,7 +4,7 @@ The home of any squad: a core that every app can use, with missions as add-ons.
 
 A squad is a leader's device and its members' phones. Members share positions, get orders, send notes and can call check fire; the leader's device runs the squad and decides everything. What the squad is out doing (a round of golf, a search, a ski tour) is a **mission**, added on top without changing the core.
 
-The plan is [issue #2](https://github.com/zacharyelston/squadz/issues/2). This is steps V1, V2 and V2b of it. The original Squadz (a Rust server and a web page) is the tag `v1`.
+The plan is [issue #2](https://github.com/zacharyelston/squadz/issues/2). This is steps V1, V2 and V2b of it, and a first Squadz phone app on top. The original Squadz (a Rust server and a web page) is the tag `v1`.
 
 | Part | Where | Status |
 | --- | --- | --- |
@@ -13,10 +13,41 @@ The plan is [issue #2](https://github.com/zacharyelston/squadz/issues/2). This i
 | **CoreGeo**: GPS points and small-area geometry | [`swift/Sources/CoreGeo`](swift/Sources/CoreGeo) | Built |
 | The wire format, for implementations in other languages | [`docs/WIRE.md`](docs/WIRE.md), [`testdata/wire`](testdata/wire) | Written, with vectors |
 | Join by QR, member credentials, the leader's identity key | SquadKit (`Credentials.swift`, `Invite.swift`), SquadLink, [`testdata/join`](testdata/join) | Built and tested on one Mac's loopback. No app scans or shows a QR code yet |
-| A Squadz phone app | | Not started |
+| **Squadz for iPhone**: lead or join a squad, see everyone on a map | [`ios/`](ios) | Works in the simulator. Not yet run on a real phone |
 | Relay for squads over the internet | | Not started (V3) |
 
 SquadKit and SquadLink come from GroupKit and GroupLink in [BackyardBallistics](https://github.com/zacharyelston/BackyardBallistics), with golf taken out. BackyardBallistics does not use this package yet; [`docs/BACKYARDBALLISTICS.md`](docs/BACKYARDBALLISTICS.md) lists what it has to change to do so.
+
+## The iPhone app
+
+One phone starts a squad and leads it; the others scan its invite code, confirm, and join. Everyone sees everyone on a map. The leader's phone *is* the squad: the others connect straight to it over Wi-Fi or a mesh, and there is no server.
+
+Xcode 16 or later and [XcodeGen](https://github.com/yonaskolb/XcodeGen):
+
+```bash
+cd ios && xcodegen generate && open Squadz.xcodeproj
+```
+
+```bash
+cd ios && xcodebuild -project Squadz.xcodeproj -scheme Squadz -destination 'platform=iOS Simulator,name=iPhone 18 Pro' test
+```
+
+A simulator has no camera. To join from one, open the invite as a link (the text of the QR code); the app still asks before joining:
+
+```bash
+xcrun simctl openurl booted 'squadz://join?…'
+```
+
+To run on a phone, pick your signing team in Xcode. It is not kept in the project file.
+
+Known limits:
+
+- Positions are shared only while the app is open and in front.
+- The leader's phone has to stay on, in reach and with the app open. If it goes, the squad stops updating until it is back; nobody else can take over yet.
+- Local network only: the same Wi-Fi, or a mesh that passes Bonjour (mDNS) between its nodes. No relay over the internet yet.
+- The map is Apple's, which needs the internet for places the phone hasn't looked at before. Pins and the member list don't.
+- A phone is in one squad at a time. Leaving means asking for a new invite to come back.
+- Joining is by QR code or invite link. The typed code is in SquadKit but has no screen.
 
 ## Using it
 
