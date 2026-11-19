@@ -1,7 +1,8 @@
 import Foundation
 
 /// What the leader's device shows as a QR code while joining is open: a link like
-/// `squadz://join?v=1&squad=…&name=…&enrol=…&cmd=…&tag=…&exp=…`.
+/// `squadz://join?v=1&squad=…&name=…&enrol=…&cmd=…&tag=…&exp=…`, with `relay` and `relay_pin` when
+/// the squad can also be reached through a relay.
 ///
 /// It carries no long-term key: `enrol` only opens an invite link, and stops working at `exp` or
 /// when the leader closes joining. The app shows "Join *name* led by *by*?" and joins only on a
@@ -20,8 +21,11 @@ public struct SquadInvite: Equatable, Sendable {
     public var expires: Date
     /// The leader's device name, for display only.
     public var by: String?
+    /// Where the squad can be reached when its leader's device isn't on this network.
+    public var relay: RelayAddress?
 
-    public init(squad: SquadID, name: String, enrol: Data, leader: Data, expires: Date, by: String? = nil) {
+    public init(squad: SquadID, name: String, enrol: Data, leader: Data, expires: Date, by: String? = nil,
+                relay: RelayAddress? = nil) {
         self.squad = squad
         self.name = name
         self.enrol = enrol
@@ -29,6 +33,7 @@ public struct SquadInvite: Equatable, Sendable {
         // The link carries whole seconds.
         self.expires = Date(timeIntervalSince1970: expires.timeIntervalSince1970.rounded(.down))
         self.by = by
+        self.relay = relay
     }
 
     public var tag: String { squad.tag }
@@ -57,6 +62,10 @@ public struct SquadInvite: Equatable, Sendable {
             URLQueryItem(name: "exp", value: String(Int(expires.timeIntervalSince1970))),
         ]
         if let by { items.append(URLQueryItem(name: "by", value: by)) }
+        if let relay {
+            items.append(URLQueryItem(name: "relay", value: relay.text))
+            if let pin = relay.pin { items.append(URLQueryItem(name: "relay_pin", value: pin.base64URL)) }
+        }
         c.queryItems = items
         // Every field above is a valid URL part.
         return c.url!
@@ -81,7 +90,14 @@ public struct SquadInvite: Equatable, Sendable {
               let exp = fields["exp"].flatMap(Int.init), exp > 0,
               fields["tag"] == SquadID(id).tag
         else { throw ParseError.malformed }
+        var relay: RelayAddress?
+        if let text = fields["relay"] {
+            guard let address = RelayAddress(text: text, pin: fields["relay_pin"]) else { throw ParseError.malformed }
+            relay = address
+        } else if fields["relay_pin"] != nil {
+            throw ParseError.malformed
+        }
         self.init(squad: SquadID(id), name: name, enrol: enrol, leader: leader,
-                  expires: Date(timeIntervalSince1970: TimeInterval(exp)), by: fields["by"].flatMap { $0.isEmpty ? nil : String($0.prefix(100)) })
+                  expires: Date(timeIntervalSince1970: TimeInterval(exp)), by: fields["by"].flatMap { $0.isEmpty ? nil : String($0.prefix(100)) }, relay: relay)
     }
 }

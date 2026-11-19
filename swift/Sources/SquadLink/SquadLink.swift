@@ -78,6 +78,101 @@ public extension NWParameters {
     }
 }
 
+/// What a link runs over: a TLS connection on the local network, or a relay. It moves bytes and
+/// says when it is up; `SquadConnection` does the rest. Everything happens on the link's queue.
+protocol LinkPipe: AnyObject {
+    var onEvent: ((PipeEvent) -> Void)? { get set }
+    func start()
+    func send(_ bytes: Data, thenClose: Bool)
+    func cancel()
+    /// Closes the link, telling the other end its key wasn't accepted where the pipe can say so.
+    func refuse()
+}
+
+enum PipeEvent {
+    /// The pipe is up. `binding` is a value both ends of it share and neither chose alone; nil
+    /// if there isn't one, and then the link can't be trusted.
+    case up(binding: Data?)
+    case bytes(Data)
+    case failed(String)
+    case closed
+}
+
+/// A TLS connection keyed per link (`NWParameters.squadLink`).
+final class LocalPipe: LinkPipe {
+    var onEvent: ((PipeEvent) -> Void)?
+    let connection: NWConnection
+    private let queue: DispatchQueue
+
+    init(_ connection: NWConnection, queue: DispatchQueue) {
+        self.connection = connection
+        self.queue = queue
+    }
+
+    func start() {
+        connection.stateUpdateHandler = { [weak self] s in
+            guard let self else { return }
+            switch s {
+            case .ready:
+                self.onEvent?(.up(binding: self.binding()))
+                self.receive()
+            case let .failed(error):
+                self.onEvent?(.failed(Self.describe(error)))
+            case let .waiting(error):
+                // TLS refusing the key shows up here: a wrong code, an invite that's closed, a
+                // credential that was revoked.
+                self.onEvent?(.failed(Self.describe(error)))
+                self.connection.cancel()
+            case .cancelled:
+                self.onEvent?(.closed)
+            default:
+                break
+            }
+        }
+        connection.start(queue: queue)
+    }
+
+    func send(_ bytes: Data, thenClose: Bool) {
+        connection.send(content: bytes, completion: .contentProcessed { [weak self] _ in
+            if thenClose { self?.connection.cancel() }
+        })
+    }
+
+    func cancel() { connection.cancel() }
+    func refuse() { connection.cancel() }
+
+    /// A value both ends of this TLS session share and nobody else can choose (RFC 5705).
+    private func binding() -> Data? {
+        guard let tls = connection.metadata(definition: NWProtocolTLS.definition) as? NWProtocolTLS.Metadata else { return nil }
+        let label = SquadService.exporterLabel
+        guard let secret = label.withCString({
+            sec_protocol_metadata_create_secret(tls.securityProtocolMetadata, label.utf8.count, $0, 32)
+        }) else { return nil }
+        return Data(secret as DispatchData)
+    }
+
+    private func receive() {
+        connection.receive(minimumIncompleteLength: 1, maximumLength: 1 << 16) { [weak self] data, _, isComplete, error in
+            guard let self else { return }
+            if let data, !data.isEmpty { self.onEvent?(.bytes(data)) }
+            if isComplete {
+                self.connection.cancel()
+            } else if let error {
+                self.onEvent?(.failed(Self.describe(error)))
+            } else {
+                self.receive()
+            }
+        }
+    }
+
+    static func describe(_ error: NWError) -> String {
+        // With a pre-shared key, a TLS handshake failure means the leader doesn't hold this key
+        // (unknown identity, -9864) or holds another under the same name (bad MAC, -9820).
+        if case let .tls(status) = error { return "\(SquadConnection.refusedKey) (TLS \(status))." }
+        return String(describing: error)
+    }
+}
+
 /// One link: a phone's (or a watcher's) connection to a leader, or the leader's
 /// side of it. Everything happens on `queue`, including the callbacks.
 public final class SquadConnection {
@@ -95,35 +190,51 @@ public final class SquadConnection {
 
     /// On the leader's side: the name of the key this link proved it holds, once it has.
     public private(set) var identity: String?
+    /// True for a link that goes through a relay.
+    public let isRelayed: Bool
 
-    let connection: NWConnection
+    private let pipe: LinkPipe
     private let queue: DispatchQueue
     private var reader = SquadWire.FrameReader()
     private var seq = 0
+    private var binding: Data?
     /// Connecting: the key to prove.
     private let key: LinkKey?
-    /// What the first frame claims. Tests change it to claim a key the TLS session wasn't made with.
+    /// What the first frame claims. Tests change it to claim a key the link wasn't made with.
     var claim: LinkKey?
     /// Accepting: the keys a device may prove.
     private let accepted: [String: LinkKey]
 
     /// The leader's side of a link a device opened.
-    init(_ connection: NWConnection, peer: PeerID, accepting keys: [LinkKey], queue: DispatchQueue) {
-        self.connection = connection
+    init(accepting pipe: LinkPipe, peer: PeerID, keys: [LinkKey], relayed: Bool, queue: DispatchQueue) {
+        self.pipe = pipe
         self.peer = peer
         self.queue = queue
+        isRelayed = relayed
         key = nil
         accepted = Dictionary(keys.map { ($0.identity, $0) }, uniquingKeysWith: { a, _ in a })
     }
 
-    /// Connects to a leader found by `SquadBrowser`, or to a host and port.
-    public init(to endpoint: NWEndpoint, key: LinkKey, service: SquadService = .squadz, queue: DispatchQueue = .main) {
-        connection = NWConnection(to: endpoint, using: .squadLink(keys: [key], service: service))
+    /// A device's side of a link, over any pipe.
+    init(over pipe: LinkPipe, key: LinkKey, relayed: Bool, queue: DispatchQueue) {
+        self.pipe = pipe
         peer = PeerID("host")
         self.queue = queue
+        isRelayed = relayed
         self.key = key
         claim = key
         accepted = [:]
+    }
+
+    /// Connects to a leader found by `SquadBrowser`, or to a host and port.
+    public convenience init(to endpoint: NWEndpoint, key: LinkKey, service: SquadService = .squadz, queue: DispatchQueue = .main) {
+        let connection = NWConnection(to: endpoint, using: .squadLink(keys: [key], service: service))
+        self.init(over: LocalPipe(connection, queue: queue), key: key, relayed: false, queue: queue)
+    }
+
+    /// Connects to a squad's leader through a relay.
+    public convenience init(through ticket: RelayTicket, squad: SquadID, key: LinkKey, queue: DispatchQueue = .main) {
+        self.init(over: RelayMemberPipe(ticket: ticket, squad: squad, queue: queue), key: key, relayed: true, queue: queue)
     }
 
     /// Seconds to reach `.ready`. A key the leader doesn't hold can leave the handshake hanging (the other
@@ -136,112 +247,80 @@ public final class SquadConnection {
         queue.asyncAfter(deadline: .now() + connectTimeout) { [weak self] in
             guard let self, self.state == .connecting else { return }
             self.set(.failed(Self.timedOut))
-            self.connection.cancel()
+            self.pipe.cancel()
         }
-        connection.stateUpdateHandler = { [weak self] s in
+        pipe.onEvent = { [weak self] event in
             guard let self else { return }
-            switch s {
-            case .ready:
-                self.linked()
-            case let .failed(error):
-                self.set(.failed(Self.describe(error)))
-            case let .waiting(error):
-                // TLS refusing the key shows up here: a wrong code, an invite that's closed, a
-                // credential that was revoked.
-                self.set(.failed(Self.describe(error)))
-                self.connection.cancel()
-            case .cancelled:
+            switch event {
+            case let .up(binding):
+                self.linked(binding)
+            case let .bytes(data):
+                self.received(data)
+            case let .failed(why):
+                self.set(.failed(why))
+            case .closed:
                 self.set(.closed)
-            default:
-                break
             }
         }
-        connection.start(queue: queue)
+        pipe.start()
     }
 
     /// - Parameter thenClose: closes the link once the message has gone.
     public func send(_ body: SquadMessage.Body, thenClose: Bool = false) {
         seq += 1
         guard let frame = try? SquadWire.encode(SquadMessage(seq: seq, body: body)) else { return }
-        connection.send(content: frame, completion: .contentProcessed { [weak self] _ in
-            if thenClose { self?.connection.cancel() }
-        })
+        pipe.send(frame, thenClose: thenClose)
     }
 
-    /// A value both ends of this TLS session share and nobody else can choose (RFC 5705).
-    private func binding() -> Data? {
-        guard let tls = connection.metadata(definition: NWProtocolTLS.definition) as? NWProtocolTLS.Metadata else { return nil }
-        let label = SquadService.exporterLabel
-        guard let secret = label.withCString({
-            sec_protocol_metadata_create_secret(tls.securityProtocolMetadata, label.utf8.count, $0, 32)
-        }) else { return nil }
-        return Data(secret as DispatchData)
-    }
-
-    /// TLS is up. A device says which key it holds; the leader's side waits to hear it.
-    private func linked() {
+    /// The pipe is up. A device says which key it holds; the leader's side waits to hear it.
+    private func linked(_ binding: Data?) {
+        guard let binding else { return fail("Couldn't secure the link.") }
+        self.binding = binding
         if let claim {
-            guard let binding = binding() else { return fail("Couldn't secure the link.") }
             send(.link(LinkProof(id: claim.identity, proof: claim.proof(binding: binding))))
             set(.ready)
         }
-        receive()
     }
 
     /// The leader's side: nothing counts until the first frame proves a key.
     private func deliver(_ m: SquadMessage) {
         if key != nil || identity != nil { return onMessage?(m) ?? () }
-        guard case let .link(proof) = m.body, let known = accepted[proof.id], let binding = binding(),
-              known.accepts(proof.proof, binding: binding) else { return fail("A device connected without proving its key.") }
+        guard case let .link(proof) = m.body, let known = accepted[proof.id], let binding,
+              known.accepts(proof.proof, binding: binding) else {
+            set(.failed("A device connected without proving its key."))
+            return pipe.refuse()
+        }
         identity = proof.id
         set(.ready)
     }
 
     private func fail(_ why: String) {
         set(.failed(why))
-        connection.cancel()
+        pipe.cancel()
     }
 
     public func cancel() {
-        connection.cancel()
+        pipe.cancel()
     }
 
     private func set(_ s: State) {
         guard s != state else { return }
+        // Once a link has failed or closed it stays that way.
+        if case .failed = state { return }
+        if state == .closed { return }
         state = s
         onState?(s)
     }
 
-    private func receive() {
-        connection.receive(minimumIncompleteLength: 1, maximumLength: 1 << 16) { [weak self] data, _, isComplete, error in
-            guard let self else { return }
-            if let data, !data.isEmpty {
-                do {
-                    for m in try self.reader.append(data) {
-                        guard self.state == .connecting || self.state == .ready else { return }
-                        self.deliver(m)
-                    }
-                } catch {
-                    self.set(.failed("Bad data from \(self.peer): \(error)"))
-                    self.connection.cancel()
-                    return
-                }
+    private func received(_ data: Data) {
+        do {
+            for m in try reader.append(data) {
+                guard state == .connecting || state == .ready else { return }
+                deliver(m)
             }
-            if isComplete {
-                self.connection.cancel()
-            } else if let error {
-                self.set(.failed(Self.describe(error)))
-            } else {
-                self.receive()
-            }
+        } catch {
+            fail("Bad data from \(peer): \(error)")
         }
-    }
-
-    static func describe(_ error: NWError) -> String {
-        // With a pre-shared key, a TLS handshake failure means the leader doesn't hold this key
-        // (unknown identity, -9864) or holds another under the same name (bad MAC, -9820).
-        if case let .tls(status) = error { return "\(refusedKey) (TLS \(status))." }
-        return String(describing: error)
     }
 }
 
@@ -370,7 +449,7 @@ public final class SquadLinkHost {
 
     private func accept(_ nw: NWConnection, keys: [LinkKey]) {
         let peer = PeerID(UUID().uuidString)
-        let c = SquadConnection(nw, peer: peer, accepting: keys, queue: queue)
+        let c = SquadConnection(accepting: LocalPipe(nw, queue: queue), peer: peer, keys: keys, relayed: false, queue: queue)
         c.onMessage = { [weak self] m in self?.onMessage?(m, peer) }
         c.onState = { [weak self, weak c] s in
             guard let self else { return }
@@ -446,6 +525,9 @@ public final class SquadEnroller {
     public var fixedEndpoint: NWEndpoint?
     /// Seconds to find the squad and get its answer.
     public var timeout: TimeInterval = 20
+    /// With an invite that names a relay: seconds to look for the squad on this network before
+    /// going through the relay.
+    public var relayAfter: TimeInterval = 3
 
     private let invite: SquadInvite?
     private let squadName: String
@@ -455,6 +537,9 @@ public final class SquadEnroller {
     private let queue: DispatchQueue
     private let finder = SquadFinder()
     private var connection: SquadConnection?
+    private var joiner: RelayJoiner?
+    /// Joined on this network; still asking the relay for a ticket.
+    private var pending: MemberCredential?
     private var finished = false
 
     /// With an invite from a QR code. The answer must come from the leader the invite names.
@@ -482,15 +567,46 @@ public final class SquadEnroller {
 
     public func start(now: Date = Date()) {
         if let invite, invite.isExpired(now: now) { return finish(.failure(SquadLinkFailure("This invite has expired. Ask for a new one."))) }
+        let relay = invite?.relay
         queue.asyncAfter(deadline: .now() + timeout) { [weak self] in
-            self?.finish(.failure(SquadLinkFailure("Couldn't reach \(self?.squadName ?? "the squad"). Is its leader's device nearby and on the same network?")))
+            guard let self else { return }
+            if let joined = self.pending { return self.finish(.success(joined)) }
+            self.finish(.failure(SquadLinkFailure(relay == nil
+                ? "Couldn't reach \(self.squadName). Is its leader's device nearby and on the same network?"
+                : "Couldn't reach \(self.squadName), on this network or through its relay.")))
         }
         if let fixedEndpoint { return connect(to: fixedEndpoint) }
         finder.find(tag: invite?.tag, name: squadName, service: service, queue: queue) { [weak self] found in
+            guard let self, self.connection == nil, self.joiner == nil else { return }
             switch found {
-            case let .success(endpoint): self?.connect(to: endpoint)
-            case let .failure(why): self?.finish(.failure(why))
+            case let .success(endpoint): self.connect(to: endpoint)
+            case let .failure(why): self.finish(.failure(why))
             }
+        }
+        guard let relay, let invite else { return }
+        queue.asyncAfter(deadline: .now() + relayAfter) { [weak self] in
+            guard let self, !self.finished, self.connection == nil, self.joiner == nil else { return }
+            // Not on this network: get a ticket from the relay, then join through it.
+            self.finder.stop()
+            self.ticket(from: relay, invite: invite, timeout: self.timeout) { result in
+                switch result {
+                case let .success(ticket):
+                    self.run(SquadConnection(through: ticket, squad: invite.squad, key: self.key, queue: self.queue), ticket: ticket)
+                case let .failure(why):
+                    self.finish(.failure(why))
+                }
+            }
+        }
+    }
+
+    private func ticket(from relay: RelayAddress, invite: SquadInvite, timeout: TimeInterval,
+                        done: @escaping (Result<RelayTicket, SquadLinkFailure>) -> Void) {
+        let j = RelayJoiner(address: relay, queue: queue)
+        joiner = j
+        j.start(squad: invite.squad, key: invite.relayKey, timeout: timeout) { [weak self] result in
+            guard let self, !self.finished else { return }
+            self.joiner = nil
+            done(result)
         }
     }
 
@@ -500,8 +616,12 @@ public final class SquadEnroller {
     }
 
     private func connect(to endpoint: NWEndpoint) {
+        run(SquadConnection(to: endpoint, key: key, service: service, queue: queue), ticket: nil)
+    }
+
+    /// - Parameter ticket: the relay ticket this link runs on, to keep with the credential.
+    private func run(_ c: SquadConnection, ticket: RelayTicket?) {
         guard !finished else { return }
-        let c = SquadConnection(to: endpoint, key: key, service: service, queue: queue)
         connection = c
         c.onState = { [weak self] s in
             guard let self else { return }
@@ -522,7 +642,9 @@ public final class SquadEnroller {
             switch m.body {
             case let .enrolled(answer):
                 do {
-                    self.finish(.success(try self.request.accept(answer, invite: self.invite)))
+                    var credential = try self.request.accept(answer, invite: self.invite)
+                    credential.relay = ticket
+                    self.joined(credential)
                 } catch EnrolmentError.wrongLeader, EnrolmentError.wrongSquad {
                     self.finish(.failure(SquadLinkFailure("Another device answered for \(self.squadName). Not joined.")))
                 } catch {
@@ -537,6 +659,20 @@ public final class SquadEnroller {
         c.start()
     }
 
+    /// Joined. If the squad has a relay and this device joined on the local network, it asks the
+    /// relay for a ticket while the invite is still open, so it can reach the squad from
+    /// elsewhere later. Without one it is still a member; it just can't use the relay.
+    private func joined(_ credential: MemberCredential) {
+        guard credential.relay == nil, let invite, let relay = invite.relay else { return finish(.success(credential)) }
+        pending = credential
+        dropConnection()
+        ticket(from: relay, invite: invite, timeout: 5) { [weak self] result in
+            var credential = credential
+            if case let .success(ticket) = result { credential.relay = ticket }
+            self?.finish(.success(credential))
+        }
+    }
+
     private func finish(_ result: Result<MemberCredential, SquadLinkFailure>) {
         guard !finished else { return }
         finished = true
@@ -546,6 +682,12 @@ public final class SquadEnroller {
 
     private func tearDown() {
         finder.stop()
+        joiner?.cancel()
+        joiner = nil
+        dropConnection()
+    }
+
+    private func dropConnection() {
         let c = connection
         connection = nil
         c?.onState = nil
@@ -592,6 +734,12 @@ public final class SquadLinkClient {
     public var maxDelay: TimeInterval = 8
     /// For tests and fixed hosts: connect here instead of browsing.
     public var fixedEndpoint: NWEndpoint?
+    /// With a relay ticket: seconds to look for the squad on this network before going through
+    /// the relay. Each new attempt looks here first.
+    public var relayAfter: TimeInterval = 3
+    /// True while the link runs through the relay.
+    public var isRelayed: Bool { connection?.isRelayed ?? false }
+    private var search = 0
     public static let notAccepted = "The leader's device no longer accepts this device. Ask for a new invite."
 
     public init(credential: MemberCredential, name: String, device: UUID, service: SquadService = .squadz,
@@ -637,6 +785,8 @@ public final class SquadLinkClient {
         guard running else { return }
         if let fixedEndpoint { return connect(to: fixedEndpoint) }
         set(attempt == 0 ? .searching : status)
+        search += 1
+        let this = search
         finder.find(tag: credential.squad.tag, name: credential.squadName, service: service, queue: queue) { [weak self] found in
             guard let self, self.connection == nil else { return }
             switch found {
@@ -644,21 +794,30 @@ public final class SquadLinkClient {
             case let .failure(why): self.giveUp(why.reason)
             }
         }
+        guard let ticket = credential.relay else { return }
+        queue.asyncAfter(deadline: .now() + relayAfter) { [weak self] in
+            guard let self, self.running, self.search == this, self.connection == nil else { return }
+            self.finder.stop()
+            self.run(SquadConnection(through: ticket, squad: self.credential.squad, key: self.credential.linkKey, queue: self.queue))
+        }
     }
 
     private func connect(to endpoint: NWEndpoint) {
+        run(SquadConnection(to: endpoint, key: credential.linkKey, service: service, queue: queue))
+    }
+
+    private func run(_ c: SquadConnection) {
         guard running else { return }
         if attempt == 0 { set(.connecting) }
-        let c = SquadConnection(to: endpoint, key: credential.linkKey, service: service, queue: queue)
         connection = c
         c.onState = { [weak self, weak c] s in
             guard let self, let c, c === self.connection else { return }
             switch s {
             case .ready:
-                self.attempt = 0
-                self.refusals = 0
                 c.send(.hello(Hello(name: self.name, device: self.device, role: self.credential.role)))
-                self.set(.connected)
+                // On the local network TLS has already checked this device's key. Through a
+                // relay the leader's device checks it now, so the link counts once it answers.
+                if !c.isRelayed { self.up() }
             case let .failed(why):
                 // The leader's device turning the key down can be a restart that hasn't loaded its
                 // keys yet, so try a few times before believing it.
@@ -679,13 +838,21 @@ public final class SquadLinkClient {
             case let .refused(why):
                 self.giveUp(why)
             case let .leaderKey(change):
+                self.up()
                 if self.credential.apply(change) { self.onCredentialChanged?(self.credential) }
             default:
-                break
+                self.up()
             }
             self.onMessage?(m)
         }
         c.start()
+    }
+
+    private func up() {
+        guard running, status != .connected else { return }
+        attempt = 0
+        refusals = 0
+        set(.connected)
     }
 
     private func dropped(_ why: String) {
@@ -704,6 +871,7 @@ public final class SquadLinkClient {
     }
 
     private func tearDown() {
+        search += 1
         finder.stop()
         let c = connection
         connection = nil
