@@ -27,9 +27,15 @@ enum Samples {
         let t = Date(timeIntervalSince1970: 1_800_000_000.25)   // the wire keeps milliseconds
         let ana = Member(id: MemberID(uuid(2)), name: "Ana", device: uuid(3), role: .member)
         let squad = Squad(id: SquadID(uuid(1)), name: "Red", members: [ana])
+        let bytes = { (n: UInt8, count: Int) in Data(repeating: n, count: count) }
+        let sealed = SealedCredential(id: bytes(1, 16), epoch: 0, issued: t, key: bytes(4, 65), sealed: bytes(5, 60))
         let all: [SquadMessage.Body] = [
-            .hello(Hello(name: "Ana", device: uuid(3), joinCode: "RED234")),
-            .hello(Hello(name: "Watcher", device: uuid(4), joinCode: "RED234", role: .observer)),
+            .link(LinkProof(id: "m:" + bytes(1, 16).hex, proof: bytes(2, 32))),
+            .hello(Hello(name: "Ana", device: uuid(3), nonce: bytes(3, 16), key: bytes(6, 65))),
+            .hello(Hello(name: "Watcher", device: uuid(4), role: .observer, nonce: bytes(3, 16))),
+            .enrolled(Enrolled(squad: squad.id, name: "Red", member: ana.id, role: .member, credential: sealed,
+                               leader: bytes(7, 65), signature: bytes(8, 64))),
+            .leaderKey(LeaderKeyChange(squad: squad.id, key: bytes(9, 65), time: t, signature: bytes(8, 64))),
             .bye,
             .position(MemberPosition(at: origin, accuracy: 3, heading: 12, time: t)),
             .orderAck(OrderAck(order: uuid(5), response: .done)),
@@ -41,7 +47,7 @@ enum Samples {
             .fileDone(uuid(8)),
             .welcome(Welcome(member: ana.id, squad: squad)),
             .observing(squad),
-            .refused("Wrong join code."),
+            .refused("Joining is closed."),
             .status(SquadStatus(revision: 4, squad: squad,
                                 holds: [.checkFire(by: "Ana"),
                                         Hold(source: "test.rally", kind: "notAtRally", member: ana.id, text: "Ana isn't at the rally point.")],
@@ -54,7 +60,7 @@ enum Samples {
         ]
         for body in all {
             switch body {   // exhaustive on purpose
-            case .hello, .bye, .position, .orderAck, .checkFire, .note, .fileOffer, .fileChunk, .fileDone,
+            case .link, .enrolled, .leaderKey, .hello, .bye, .position, .orderAck, .checkFire, .note, .fileOffer, .fileChunk, .fileDone,
                  .welcome, .observing, .refused, .status, .order, .receipt, .positions, .mission: break
             }
         }
@@ -108,20 +114,47 @@ final class Yard<M: Mission> {
     var got: [String: [SquadMessage.Body]] = [:]
     var devices: [String: UUID] = [:]
 
-    init(mission: M, code: String = "RED234") {
-        host = SquadCore(squad: Squad(name: "Red"), mission: mission, joinCode: code)
+    var credentials: [String: MemberCredential] = [:]
+    lazy var invite = host.openJoining(now: now)
+
+    init(mission: M) {
+        host = SquadCore(squad: Squad(name: "Red"), mission: mission)
         net.add(leader) { [unowned self] m, from in self.host.handle(m, from: from, now: self.now) }
     }
 
     func peer(_ name: String) -> PeerID { PeerID("phone-" + name) }
 
+    /// Joins with the open invite the first time, then connects with the credential that gave.
+    /// A second call is the same device coming back on a new link.
     @discardableResult
-    func join(_ name: String, code: String = "RED234", role: Hello.Role? = nil) -> MemberID? {
+    func join(_ name: String, role: Hello.Role? = nil) -> MemberID? {
         let device = devices[name] ?? UUID()
         devices[name] = device
+        if credentials[name] == nil {
+            let door = PeerID("invite-" + name)
+            let request = EnrolmentRequest(name: name, device: device, role: role)
+            var answer: Enrolled?
+            var refusal: SquadMessage.Body?
+            net.add(door) { m, _ in
+                if case let .enrolled(e) = m.body { answer = e }
+                if case .refused = m.body { refusal = m.body }
+                return []
+            }
+            host.linkOpened(door, identity: invite.linkKey.identity)
+            net.send(from: door, [Outgoing(to: leader, .hello(request.hello))])
+            net.run()
+            host.peerClosed(door)
+            guard let answer, let credential = try? request.accept(answer, invite: invite) else {
+                if let refusal { got[name, default: []].append(refusal) }
+                return nil
+            }
+            credentials[name] = credential
+        }
+        guard let credential = credentials[name] else { return nil }
         net.add(peer(name)) { [unowned self] m, _ in self.got[name, default: []].append(m.body); return [] }
-        send(name, .hello(Hello(name: name, device: device, joinCode: code, role: role)))
-        return host.squad.members.first { $0.device == device }?.id
+        host.linkOpened(peer(name), identity: credential.linkKey.identity)
+        send(name, .hello(Hello(name: name, device: device, role: role)))
+        return credential.member
     }
 
     func send(_ name: String, _ body: SquadMessage.Body) {

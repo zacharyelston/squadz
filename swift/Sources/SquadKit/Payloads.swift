@@ -16,14 +16,19 @@ public struct Hello: Codable, Equatable, Sendable {
     }
     public var name: String
     public var device: UUID
-    public var joinCode: String
-    /// Nil means member.
+    /// A request. On a credential link the credential's role is what counts. Nil means member.
     public var role: Role?
-    public init(name: String, device: UUID, joinCode: String, role: Role? = nil) {
+    /// 16 random bytes, fresh for every hello. The leader's signed answer covers it.
+    public var nonce: Data
+    /// On an invite link only: this device's one-time P-256 key (X9.63), which the leader seals
+    /// the credential to.
+    public var key: Data?
+    public init(name: String, device: UUID, role: Role? = nil, nonce: Data = .random(16), key: Data? = nil) {
         self.name = name
         self.device = device
-        self.joinCode = joinCode
         self.role = role
+        self.nonce = nonce
+        self.key = key
     }
 }
 

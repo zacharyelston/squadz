@@ -12,8 +12,38 @@ public struct SquadCore<M: Mission> {
     /// The mission's own state. Whatever a mission does to itself, it can't lift a core hold:
     /// `holds` unions the core's with the mission's.
     public var mission: M
-    public let joinCode: String
     public private(set) var revision: Int
+
+    /// The root key and this device's identity key. Kept in the Keychain, never in a file.
+    public private(set) var keys: LeaderKeys
+    /// Every credential issued, without its secret. Save this with the squad.
+    public private(set) var credentials: [CredentialRecord]
+    /// Bumped by `resetSquad`. A credential from an earlier epoch no longer works.
+    public private(set) var epoch: Int
+    /// This squad's identity key changes, oldest first, for devices that pinned an earlier key.
+    public private(set) var keyChanges: [LeaderKeyChange]
+    /// Invites that are open (until each expires, is used up, or joining closes).
+    public private(set) var invitations: [Invitation] = []
+    /// The typed code, while joining is open. For local Wi-Fi only.
+    public private(set) var joinCode: String?
+    private var joinCodeExpires = Date.distantPast
+    /// How each link proved itself, from the transport.
+    private var links: [PeerID: LinkAuth] = [:]
+
+    /// An open invite.
+    public struct Invitation: Equatable, Sendable {
+        public var secret: Data
+        public var expires: Date
+        /// Closed by the first device that joins with it.
+        public var singleUse: Bool
+        var identity: String
+    }
+
+    enum LinkAuth: Equatable {
+        case code
+        case invite(String)
+        case member(Data)
+    }
 
     public private(set) var peers: [PeerID: MemberID] = [:]
     /// Watchers. They get status, positions, orders and notes; what they send is ignored.
@@ -33,10 +63,16 @@ public struct SquadCore<M: Mission> {
     public private(set) var activeCheckFire: CheckFire?
     private var seenCheckFires: Set<UUID> = []
 
-    public init(squad: Squad, mission: M, joinCode: String, revision: Int = 0) {
+    /// A new squad, or one read back: `keys` from the Keychain, the rest from where the app
+    /// saved it.
+    public init(squad: Squad, mission: M, keys: LeaderKeys = LeaderKeys(), credentials: [CredentialRecord] = [],
+                epoch: Int = 0, keyChanges: [LeaderKeyChange] = [], revision: Int = 0) {
         self.squad = squad
         self.mission = mission
-        self.joinCode = joinCode
+        self.keys = keys
+        self.credentials = credentials
+        self.epoch = epoch
+        self.keyChanges = keyChanges
         self.revision = revision
     }
 
@@ -53,6 +89,63 @@ public struct SquadCore<M: Mission> {
     public func holds(now: Date) -> Set<Hold> {
         let core = view
         return core.holds.union(mission.holds(core: core, now: now))
+    }
+
+    // MARK: Joining
+
+    /// Opens joining and returns the invite to show as a QR code. Anyone who scans it before it
+    /// expires can join, so show it only to the people it is for. `typedCode` also opens the
+    /// six-character code (`joinCode`).
+    public mutating func openJoining(now: Date, lifetime: TimeInterval = 15 * 60, typedCode: Bool = false,
+                                     by device: String? = nil) -> SquadInvite {
+        if typedCode {
+            joinCode = joinCode ?? JoinCode.make()
+            joinCodeExpires = now.addingTimeInterval(lifetime)
+        }
+        return invite(singleUse: false, now: now, lifetime: lifetime, by: device)
+    }
+
+    /// An invite for one person: the first device to join with it uses it up.
+    public mutating func inviteOne(now: Date, lifetime: TimeInterval = 15 * 60, by device: String? = nil) -> SquadInvite {
+        invite(singleUse: true, now: now, lifetime: lifetime, by: device)
+    }
+
+    /// Closes joining: every invite and the typed code stop working. Members aren't affected.
+    public mutating func closeJoining() {
+        invitations = []
+        joinCode = nil
+    }
+
+    private mutating func invite(singleUse: Bool, now: Date, lifetime: TimeInterval, by device: String?) -> SquadInvite {
+        invitations.removeAll { $0.expires <= now }
+        let invite = SquadInvite(squad: squadID, name: squad.name, enrol: .random(16), leader: keys.fingerprint,
+                                 expires: now.addingTimeInterval(lifetime), by: device)
+        invitations.append(Invitation(secret: invite.enrol, expires: invite.expires, singleUse: singleUse,
+                                      identity: invite.linkKey.identity))
+        return invite
+    }
+
+    /// Every key a device may connect with right now. Give these to the transport again after
+    /// anything that changes them: joining opened or closed, a device joined, a member removed.
+    public func linkKeys(now: Date) -> [LinkKey] {
+        var out = credentials.filter { !$0.revoked && $0.epoch == epoch }.map {
+            LinkKey.member(credential: $0.id, secret: keys.memberSecret(squad: squadID, credential: $0.id, epoch: $0.epoch), squad: squadID)
+        }
+        out += invitations.filter { $0.expires > now }.map { LinkKey.invite(secret: $0.secret, squad: squadID) }
+        if let joinCode, joinCodeExpires > now { out.append(.code(joinCode)) }
+        return out
+    }
+
+    /// From the transport, once a link has proved which key it holds and before any of its
+    /// messages. A link the core hasn't been told about can't join.
+    public mutating func linkOpened(_ peer: PeerID, identity: String) {
+        if identity == "code" {
+            links[peer] = .code
+        } else if identity.hasPrefix("e:") {
+            links[peer] = .invite(identity)
+        } else if identity.hasPrefix("m:"), let id = Data(hex: String(identity.dropFirst(2))) {
+            links[peer] = .member(id)
+        }
     }
 
     // MARK: Messages
@@ -99,36 +192,82 @@ public struct SquadCore<M: Mission> {
             guard m.id == M.id, m.version == M.version else { return [] }
             let core = view
             return finish(mission.handle(m.payload, from: member, peer: peer, core: core, now: now), now: now)
-        case .hello, .fileOffer, .fileChunk, .fileDone, .welcome, .observing, .refused, .status, .order, .receipt, .positions:
+        case .hello, .link, .fileOffer, .fileChunk, .fileDone, .enrolled, .leaderKey, .welcome, .observing, .refused,
+             .status, .order, .receipt, .positions:
             return []   // the leader's own messages from a phone, or files (a squad doesn't take them): ignored
         }
     }
 
     private mutating func join(_ hello: Hello, peer: PeerID, now: Date) -> [Outgoing] {
-        guard hello.joinCode == joinCode else { return [Outgoing(to: peer, .refused("Wrong join code."))] }
-        if hello.role == .observer {
+        func refuse(_ why: String) -> [Outgoing] { [Outgoing(to: peer, .refused(why), thenClose: true)] }
+        switch links[peer] {
+        case nil:
+            return refuse("This link hasn't shown a key.")
+        case .code:
+            guard joinCode != nil, joinCodeExpires > now else { return refuse("Joining is closed.") }
+            return enrol(hello, peer: peer, now: now) ?? refuse("Couldn't join: update the app.")
+        case let .invite(identity):
+            guard let i = invitations.firstIndex(where: { $0.identity == identity && $0.expires > now }) else {
+                return refuse("This invite has expired or was already used.")
+            }
+            guard let out = enrol(hello, peer: peer, now: now) else { return refuse("Couldn't join: update the app.") }
+            if invitations[i].singleUse { invitations.remove(at: i) }
+            return out
+        case let .member(id):
+            guard let record = credentials.first(where: { $0.id == id && !$0.revoked && $0.epoch == epoch }) else {
+                return refuse("This device is no longer in the squad.")
+            }
+            return connect(record, peer: peer, now: now)
+        }
+    }
+
+    /// A new device on an invite link: issues its credential. It isn't connected yet; it comes
+    /// back on a link keyed by the credential. Every device that joins is a new member, whatever
+    /// device ID it gives: the ID isn't proof of anything.
+    private mutating func enrol(_ hello: Hello, peer: PeerID, now: Date) -> [Outgoing]? {
+        guard hello.nonce.count == 16, let memberKey = hello.key else { return nil }
+        let role: Hello.Role = hello.role == .observer ? .observer : .member
+        let id = Data.random(16)
+        let issued = now.roundedToWire
+        guard let sealed = try? SealedCredential.seal(secret: keys.memberSecret(squad: squadID, credential: id, epoch: epoch),
+                                                      id: id, epoch: epoch, issued: issued, squad: squadID, for: memberKey) else { return nil }
+        var member: MemberID?
+        if role == .member {
+            let m = Member(name: hello.name, device: hello.device, role: mission.role(forNewMemberOf: squad))
+            squad.members.append(m)
+            member = m.id
+        }
+        credentials.append(CredentialRecord(id: id, member: member, role: role, name: hello.name, device: hello.device,
+                                            epoch: epoch, issued: issued, revoked: false))
+        let signature = keys.sign(Enrolled.signed(squad: squadID, member: member, role: role, nonce: hello.nonce,
+                                                  memberKey: memberKey, credential: sealed))
+        let answer = Enrolled(squad: squadID, name: squad.name, member: member, role: role, credential: sealed,
+                              leader: keys.publicKey, signature: signature)
+        return [Outgoing(to: peer, .enrolled(answer), thenClose: true)] + (member == nil ? [] : changed(now: now))
+    }
+
+    /// A device back on its credential. Who it is and what it may do come from the credential,
+    /// not from its hello.
+    private mutating func connect(_ record: CredentialRecord, peer: PeerID, now: Date) -> [Outgoing] {
+        let changes = keyChanges.map { Outgoing(to: peer, .leaderKey($0)) }
+        guard let id = record.member, squad.members.contains(where: { $0.id == id }) else {
+            guard record.role == .observer else {
+                return [Outgoing(to: peer, .refused("This device is no longer in the squad."), thenClose: true)]
+            }
             peers[peer] = nil
             observers.insert(peer)
             let known = positions.values.sorted { $0.time < $1.time }
-            return [Outgoing(to: peer, .observing(squad))]
+            return changes + [Outgoing(to: peer, .observing(squad))]
                 + mission.observerWelcome(core: view).map { Outgoing.mission(M.self, to: peer, $0) }
                 + [Outgoing(to: peer, .status(status(now: now)))]
                 + (known.isEmpty ? [] : [Outgoing(to: peer, .positions(PositionsReport(squad: squadID, positions: known)))])
         }
         observers.remove(peer)
-        let id: MemberID
-        if let existing = squad.members.first(where: { $0.device == hello.device }) {
-            id = existing.id
-        } else {
-            let m = Member(name: hello.name, device: hello.device, role: mission.role(forNewMemberOf: squad))
-            squad.members.append(m)
-            id = m.id
-        }
         peers = peers.filter { $0.value != id }   // a rejoin replaces the old link
         peers[peer] = id
         // Orders for this member that it hasn't finished, so a rejoin (or a late joiner) has them.
         let open = orders.filter { $0.isFor(id) && acks[$0.id]?[id] != .done && acks[$0.id]?[id] != .cannot }.suffix(10)
-        return [Outgoing(to: peer, .welcome(Welcome(member: id, squad: squad)))]
+        return changes + [Outgoing(to: peer, .welcome(Welcome(member: id, squad: squad)))]
             + open.map { Outgoing(to: peer, .order($0)) } + changed(now: now)
     }
 
@@ -136,6 +275,7 @@ public struct SquadCore<M: Mission> {
     public mutating func peerClosed(_ peer: PeerID) {
         peers[peer] = nil
         observers.remove(peer)
+        links[peer] = nil
     }
 
     // MARK: The leader's actions
@@ -146,12 +286,63 @@ public struct SquadCore<M: Mission> {
         return changed(now: now)
     }
 
-    /// Takes a member off the roster (gone home).
+    /// Takes a member off the roster and revokes their credential: their link closes and their
+    /// device can't connect again without a new invite.
     public mutating func removeMember(_ member: MemberID, now: Date) -> [Outgoing] {
+        let ids = Set(credentials.filter { $0.member == member }.map(\.id))
+        let closing = revoke(ids)
         squad.members.removeAll { $0.id == member }
-        peers = peers.filter { $0.value != member }
         positions[member] = nil
-        return changed(now: now)
+        return closing + changed(now: now)
+    }
+
+    /// Revokes one credential: an observer's, or a member's (which also takes them off the roster).
+    public mutating func revoke(credential id: Data, now: Date) -> [Outgoing] {
+        guard let record = credentials.first(where: { $0.id == id && !$0.revoked }) else { return [] }
+        if let member = record.member { return removeMember(member, now: now) }
+        return revoke([id])
+    }
+
+    private mutating func revoke(_ ids: Set<Data>) -> [Outgoing] {
+        for i in credentials.indices where ids.contains(credentials[i].id) { credentials[i].revoked = true }
+        let gone = links.compactMap { peer, auth -> PeerID? in
+            if case let .member(id) = auth, ids.contains(id) { return peer }
+            return nil
+        }.sorted { $0.raw < $1.raw }
+        for peer in gone {
+            peers[peer] = nil
+            observers.remove(peer)
+            links[peer] = nil
+        }
+        return gone.map { Outgoing(to: $0, .refused("Removed from the squad."), thenClose: true) }
+    }
+
+    /// The real reset: a new root key, so every credential stops working, and an empty roster.
+    /// Everyone joins again with a new invite. The identity key stays, so this is still the same
+    /// leader to anyone who pinned it.
+    public mutating func resetSquad(root: Data = .random(32), now: Date) -> [Outgoing] {
+        let everyone = links.keys.sorted { $0.raw < $1.raw }
+        keys.root = root
+        epoch += 1
+        credentials = []
+        squad.members = []
+        positions = [:]
+        peers = [:]
+        observers = []
+        links = [:]
+        closeJoining()
+        revision += 1
+        return everyone.map { Outgoing(to: $0, .refused("The squad was reset. Join again."), thenClose: true) }
+    }
+
+    /// Moves this device to a new identity key, signed by the old one so that devices which
+    /// pinned the old key follow. Devices that are away get the change when they next connect.
+    public mutating func changeIdentity(to new: LeaderKeys, now: Date) -> [Outgoing] {
+        let change = LeaderKeyChange(squad: squadID, to: new.publicKey, time: now, signedBy: keys)
+        keys.identity = new.identity
+        keyChanges.append(change)
+        closeJoining()   // open invites name the old key
+        return (Array(peers.keys) + Array(observers)).sorted { $0.raw < $1.raw }.map { Outgoing(to: $0, .leaderKey(change)) }
     }
 
     /// The leader's own position, shared with observers like a member's. The leader's device is
