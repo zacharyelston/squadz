@@ -34,21 +34,25 @@ RELAY_LISTEN=0.0.0.0:8443 RELAY_DB=/var/lib/squadz/relay.db ./target/release/squ
 | `RELAY_LISTEN` | Address to listen on. Default `0.0.0.0:8443` |
 | `RELAY_DB` | The SQLite file. Default `relay.db` |
 | `RELAY_TLS_CERT`, `RELAY_TLS_KEY` | A certificate chain and its key, PEM. With both, the relay serves TLS itself and prints the `relay_pin` for that certificate |
+| `RELAY_TLS_DIR` | Instead of the two above: a folder where the relay keeps a certificate of its own making (`cert.pem`, `key.pem`). It makes them on its first start and never replaces them |
+| `RELAY_TLS_HOSTS` | Names and addresses for that certificate, separated by commas. Phones that hold the pin don't check them |
 | `RELAY_WEB_ORIGIN` | The one web page that may connect from a browser, like `https://app.example`. Unset, every browser is refused. Native apps are not affected |
 | `RELAY_TRUST_PROXY` | `1` when a proxy in front sets `X-Forwarded-For`, so rate limits count the device's address and not the proxy's |
 
 Phones connect only over TLS (`wss://`). Either:
 
 - **Behind a host that adds TLS** with a certificate phones already trust. Run the relay without a certificate, set `RELAY_TRUST_PROXY=1`, and give the app just the address.
-- **With its own certificate.** A certificate nobody signed is fine: the app accepts exactly the certificate whose fingerprint (`relay_pin`) is in the invite, and nothing else.
+- **With its own certificate.** A certificate nobody signed is fine: the app accepts exactly the certificate whose fingerprint (`relay_pin`) is in the invite, and nothing else. The relay makes one itself:
 
   ```bash
-  openssl ecparam -genkey -name prime256v1 -noout -out key.pem
-  openssl req -x509 -new -key key.pem -days 825 -subj /CN=relay -addext "subjectAltName=DNS:relay" -out cert.pem
-  RELAY_TLS_CERT=cert.pem RELAY_TLS_KEY=key.pem ./target/release/squadz-relay
+  RELAY_TLS_DIR=/var/lib/squadz ./target/release/squadz-relay
   ```
 
-  The pin is of the whole certificate, so it changes when the certificate does. Members joined with the old pin need a new invite.
+  It prints the `relay_pin` when it starts, and `squadz-relay pin /var/lib/squadz/cert.pem` prints it again. To bring your own instead, set `RELAY_TLS_CERT` and `RELAY_TLS_KEY`.
+
+  The pin is of the whole certificate, so it changes when the certificate does, and members joined with the old pin need a new invite. That is why the relay never replaces the one it made: keep the folder.
+
+**On a mesh node.** [`deploy/openmanet`](../deploy/openmanet) has the service script and install steps for running the relay on an OpenMANET node, for a mesh where phones on different nodes can't find each other.
 
 [`relay/Dockerfile`](../relay/Dockerfile) builds a container. It has not been built or run yet.
 
@@ -103,7 +107,7 @@ The relay pings every 20 seconds and closes a socket that says nothing, not even
 
 ## Tested, and not
 
-- `cd relay && cargo test`: 12 tests against real sockets on one machine. Rooms, tickets, invites and their expiry, the rate limit, a leader replaced, a device revoked, a squad ended, a restart on the same file, and the browser `Origin` rule.
+- `cd relay && cargo test`: 13 tests, most against real sockets on one machine. Rooms, tickets, invites and their expiry, the rate limit, a leader replaced, a device revoked, a squad ended, a restart on the same file, and the browser `Origin` rule.
 - `cd swift && swift test` starts the built relay with TLS and a certificate made for the run, and joins, links, removes and restarts through it with a pinned certificate. One more test runs a relay behind a tap that keeps every byte in and out of it, joins, sends a position, a note and an order, and checks that none of the names, places or words are in what the tap kept. Without the relay binary those 10 tests are skipped.
 - Five more Swift tests need no relay: they play a hostile carrier that swaps a joining device's request for its own, changes a frame, and plays a recorded link back.
 - By hand: the app in a simulator and a Mac stand-in for the second phone, each leading in turn, through a relay on the same Mac.

@@ -18,6 +18,7 @@ serde_json = "1"
 sha2 = "0.10"
 getrandom = "0.2"
 base64 = "0.22"
+rcgen = { version = "0.13", default-features = false, features = ["pem", "ring"] }
 
 [dev-dependencies]
 tokio-tungstenite = "0.29"

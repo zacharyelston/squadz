@@ -639,6 +639,42 @@ pub async fn serve(listener: tokio::net::TcpListener, relay: Arc<Relay>) -> std:
     axum::serve(listener, relay.router().into_make_service_with_connect_info::<SocketAddr>()).await
 }
 
+/// A certificate of the relay's own making, for a relay with no name anyone could vouch for: a
+/// mesh node, or a machine reached by address. Looks for `cert.pem` and `key.pem` in `dir` and
+/// makes them if neither is there. It never replaces one: the pin phones hold is of this exact
+/// certificate, so a new one would lock every squad's invites out.
+///
+/// `hosts` are the names and addresses the certificate carries. Phones that hold the pin don't
+/// look at them; they are for other tools.
+pub fn own_certificate(dir: &std::path::Path, hosts: &[String]) -> Result<(std::path::PathBuf, std::path::PathBuf), String> {
+    let cert = dir.join("cert.pem");
+    let key = dir.join("key.pem");
+    match (cert.exists(), key.exists()) {
+        (true, true) => return Ok((cert, key)),
+        (false, false) => {}
+        _ => return Err(format!("{} has one of cert.pem and key.pem but not the other; put the missing one back, or remove both to make new ones (every squad then needs a new invite)", dir.display())),
+    }
+    let names = if hosts.is_empty() { vec!["squadz-relay".to_string()] } else { hosts.to_vec() };
+    let made = rcgen::generate_simple_self_signed(names).map_err(|e| format!("couldn't make a certificate: {e}"))?;
+    std::fs::create_dir_all(dir).map_err(|e| format!("couldn't make {}: {e}", dir.display()))?;
+    write_private(&key, &made.key_pair.serialize_pem()).map_err(|e| format!("couldn't write {}: {e}", key.display()))?;
+    std::fs::write(&cert, made.cert.pem()).map_err(|e| format!("couldn't write {}: {e}", cert.display()))?;
+    Ok((cert, key))
+}
+
+/// Readable by its owner only.
+fn write_private(path: &std::path::Path, text: &str) -> std::io::Result<()> {
+    use std::io::Write;
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    options.open(path)?.write_all(text.as_bytes())
+}
+
 /// What goes in an invite's `relay_pin`: SHA-256 of the first certificate in a PEM file, base64 for URLs.
 pub fn certificate_pin(pem: &str) -> Option<String> {
     let body: String = pem
@@ -657,6 +693,31 @@ pub fn certificate_pin(pem: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_relay_makes_its_own_certificate_once() {
+        let dir = std::env::temp_dir().join(format!("squadz-relay-cert-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let (cert, key) = own_certificate(&dir, &["10.41.253.10".into(), "relay.local".into()]).unwrap();
+        let first = certificate_pin(&std::fs::read_to_string(&cert).unwrap()).unwrap();
+        assert_eq!(first.len(), 43);
+        assert!(std::fs::read_to_string(&key).unwrap().contains("PRIVATE KEY"));
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(std::fs::metadata(&key).unwrap().permissions().mode() & 0o777, 0o600);
+        }
+
+        // A second start keeps it: the pin phones hold must not change.
+        own_certificate(&dir, &[]).unwrap();
+        assert_eq!(certificate_pin(&std::fs::read_to_string(&cert).unwrap()).unwrap(), first);
+
+        // Half a pair is a mistake to fix by hand, not to paper over with a new certificate.
+        std::fs::remove_file(&key).unwrap();
+        assert!(own_certificate(&dir, &[]).is_err());
+        assert_eq!(certificate_pin(&std::fs::read_to_string(&cert).unwrap()).unwrap(), first);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     use super::*;
 
     #[test]
