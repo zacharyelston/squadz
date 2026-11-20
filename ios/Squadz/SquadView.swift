@@ -59,10 +59,10 @@ struct SquadView: View {
                 ToolbarItem(placement: .topBarLeading) {
                     Button(leading ? "End" : "Leave", role: .destructive) { confirmingLeave = true }
                 }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Squad settings", systemImage: "gearshape") { choosingDetails = true }
+                }
                 if leading {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button("Squad settings", systemImage: "gearshape") { choosingDetails = true }
-                    }
                     ToolbarItem(placement: .primaryAction) {
                         Button("Invite", systemImage: "qrcode") { inviting = true }
                     }
@@ -78,7 +78,7 @@ struct SquadView: View {
                 Text(leading ? "Everyone is disconnected and has to join a new squad." : "You'll need a new invite to come back.")
             }
             .sheet(isPresented: $inviting) { InviteView() }
-            .sheet(isPresented: $choosingDetails) { SquadSettingsView() }
+            .sheet(isPresented: $choosingDetails) { SquadSettingsView(leading: leading) }
         }
     }
 }
@@ -101,6 +101,9 @@ enum MemberDetail: String, CaseIterable, Identifiable {
 
     /// What the leader has chosen to show, kept as the names joined by commas. Everything, until
     /// they choose.
+    /// Only the leader's device knows who is connected and when they joined.
+    var leaderOnly: Bool { self == .link || self == .joined }
+
     static let storageKey = "memberDetails"
     static let everything = allCases.map(\.rawValue).joined(separator: ",")
 
@@ -113,8 +116,10 @@ enum MemberDetail: String, CaseIterable, Identifiable {
     }
 }
 
-/// The leader's settings for the squad screen: which details the member list shows.
+/// Settings for the squad screen, on any device: which details the member list shows. A
+/// member's phone offers the ones it has.
 struct SquadSettingsView: View {
+    let leading: Bool
     @Environment(\.dismiss) private var dismiss
     @AppStorage(MemberDetail.storageKey) private var stored = MemberDetail.everything
 
@@ -122,7 +127,7 @@ struct SquadSettingsView: View {
         NavigationStack {
             List {
                 Section {
-                    ForEach(MemberDetail.allCases) { detail in
+                    ForEach(MemberDetail.allCases.filter { leading || !$0.leaderOnly }) { detail in
                         let on = MemberDetail.chosen(stored).contains(detail)
                         Button {
                             var chosen = MemberDetail.chosen(stored)
@@ -140,7 +145,9 @@ struct SquadSettingsView: View {
                 } header: {
                     Text("Show under each member")
                 } footer: {
-                    Text("This changes the list on this device only. Members' phones show what they know: distance, accuracy and coordinates.")
+                    Text(leading
+                         ? "This changes the list on this device only. Everyone in the squad chooses for their own."
+                         : "This changes the list on this phone only. The squad's leader also sees who is connected and when each person joined.")
                 }
             }
             .navigationTitle("Squad settings")
@@ -170,8 +177,7 @@ struct MemberList: View {
                     Spacer()
                     Text(Self.status(located, now: now)).foregroundStyle(.secondary)
                 }
-                // The choice is the leader's; a member's phone shows what it has.
-                let details = Self.details(located, from: mine, showing: model.role == .leader ? MemberDetail.chosen(stored) : Set(MemberDetail.allCases))
+                let details = Self.details(located, from: mine, showing: MemberDetail.chosen(stored))
                 if !details.isEmpty {
                     Text(details.joined(separator: " · "))
                         .font(.footnote)
