@@ -127,7 +127,7 @@ cd swift && swift test
 cd ios && xcodegen generate && xcodebuild -project Squadz.xcodeproj -scheme Squadz -destination 'platform=iOS Simulator,name=iPhone 18 Pro' test
 ```
 
-The Swift tests that go through a relay start the one just built, and are skipped if it isn't there.
+The Swift tests that go through a relay start the one just built, and are skipped if it isn't there. As of this writing: 13 relay tests, 83 package tests and 11 app tests.
 
 ## Shared geometry and zones
 
