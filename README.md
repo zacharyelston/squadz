@@ -32,6 +32,8 @@ One device starts a squad and leads it; the others scan its invite code, confirm
 - **Orders.** The leader sends one member, several, or the whole squad somewhere with a tap on the map, tells them to hold, or sends a note. Each answers Seen, Done or Can't, and the leader sees every answer. The leader can take an order back.
 - **Field notes.** A chat the whole squad reads and writes.
 - **Leaving and removing.** Either one tells the rest of the squad.
+- **Video, a first cut.** A member can stream their camera to the leader's device: one at a time, and only on a tap. The leader can record a clip or snap a still, and the squad is shown when they do. [`docs/VIDEO.md`](docs/VIDEO.md) says how it works and what it doesn't do yet.
+- **A mission log.** The leader's device keeps what happened in each squad, in time order: positions, orders and answers, notes, who came and went, streams, and the clips and stills kept from them. It can be reviewed in the app and exported whole. [`docs/MISSION_LOG.md`](docs/MISSION_LOG.md).
 
 [`docs/APP.md`](docs/APP.md) walks through every screen.
 
@@ -56,7 +58,7 @@ To run on a phone, pick your signing team in Xcode. It is not kept in the projec
 Known limits:
 
 - Positions are shared only while the app is open and in front.
-- Orders and notes are kept only while the leader's app is running. If it is closed and opened again, the squad and its members come back; what was sent and said does not.
+- Orders and notes on screen are kept only while the leader's app is running. If it is closed and opened again, the squad and its members come back; what was sent and said does not, though the mission log still has it.
 - The leader's phone has to stay on, in reach and with the app open. If it goes, the squad stops updating until it is back; nobody else can take over yet.
 - Without a relay, local network only: the same Wi-Fi, or a mesh that passes Bonjour (mDNS) between its nodes. With one, the relay sees which devices are connected and how much they send, not what; and a phone that joined before the squad had a relay needs a new invite to use it.
 - The map is Apple's, which needs the internet for places the phone hasn't looked at before. Pins and the member list don't.
@@ -125,4 +127,4 @@ cd swift && swift test
 cd ios && xcodegen generate && xcodebuild -project Squadz.xcodeproj -scheme Squadz -destination 'platform=iOS Simulator,name=iPhone 18 Pro' test
 ```
 
-The Swift tests that go through a relay start the one just built, and are skipped if it isn't there. As of this writing: 13 relay tests, 68 package tests and 8 app tests.
+The Swift tests that go through a relay start the one just built, and are skipped if it isn't there. As of this writing: 13 relay tests, 73 package tests and 10 app tests.
