@@ -25,7 +25,7 @@ The transport under the frames is not part of this section: the local link is §
 | `v` | The core's version. A leader answers any message carrying another value with `refused` and does nothing else with it |
 | `seq` | A count per sender per link, starting at 1 |
 | `type` | One of the types in §4 |
-| `body` | That type's body. `bye` has none |
+| `body` | That type's body. `bye` and `leave` have none |
 
 **Who sent a message is the link it arrived on.** No field in a message says who it is from; where a body has one (`position.member`, `note.author`), the leader overwrites it.
 
@@ -54,7 +54,8 @@ SquadKit writes keys in sorted order so the same message is always the same byte
 | `link` | `id`, `proof` | The first frame on a link, for the transport: which key the device holds (§8). The squad's logic never sees it |
 | `seal` | `id`, `nonce` | The first frame on a link a relay carries, in place of `link` (§9). The squad's logic never sees it |
 | `hello` | `name`, `device`, `nonce`, `role`?, `key`? | The first message after `link` or `seal`. `nonce` is 16 fresh random bytes. `key` is the device's one-time public key, sent on an invite link only. `role` is `member` (the default), `observer` or `contributor`; a squad refuses a contributor, and on a credential link the credential's role is what counts |
-| `bye` | none | Leaving. The member stays on the roster |
+| `bye` | none | Going for now (the app is closing). The member stays on the roster and can link again |
+| `leave` | none | Leaving the squad for good. The leader takes the member off the roster, revokes its credential and tells everyone (`notice`) |
 | `position` | `at`, `accuracy`, `time`, `heading`?, `member`? | `member` is ignored from a phone |
 | `orderAck` | `order`, `response` | `seen`, `done` or `cannot`. Counted only from someone the order was for |
 | `checkFire` | `id`, `by` | Anyone may call it. A repeated `id` is ignored |
@@ -76,6 +77,7 @@ SquadKit writes keys in sorted order so the same message is always the same byte
 | `status` | `revision`, `squad`, `holds`, `missions` | Sent to everyone whenever the squad changes |
 | `order` | `id`, `kind`, `text`, `time`, `at`?, `to`? | No `to` means the whole squad. Text up to 140 characters |
 | `receipt` | `id`, `status`, `detail` | What happened to a note or file: `received`, `stored` or `refused` |
+| `notice` | `id`, `kind`, `text`, `time`, `member`? | Something to tell people. `kind` is `left` (a member left) or `removed` (the leader removed one); `member` is who, and may no longer be on the roster. Sent to every member and observer still linked. Nothing acts on a notice |
 | `positions` | `squad`, `positions` | To observers always. To members too when the leader shares positions: each new position, and on connecting the ones already known |
 
 ### Either way
@@ -89,6 +91,7 @@ SquadKit writes keys in sorted order so the same message is always the same byte
 - **Squad:** `id`, `name`, `members`.
 - **Member:** `id`, `name`, `device`, `role`. The core's only role is `member`; a mission may define others. Show an unknown role as a plain member.
 - **Hold:** `source`, `kind`, `text`, `member`?. `source` is `core` or a mission's ID. The core's only hold is `kind` `checkFire`. `text` is for people; show it for holds you don't recognise.
+- **Notice kinds:** `left` and `removed`. Show an unknown kind by its `text`.
 - **Order kinds:** the core's are `moveTo`, `holdPosition`, `capture` and `note`. A mission may add its own; show an unknown kind by its `text`.
 
 ## 5. What a leader does
@@ -98,9 +101,10 @@ SquadKit writes keys in sorted order so the same message is always the same byte
 - **`hello` on a credential link:** the member and the role come from the credential, not from the `hello`. The leader sends any `leaderKey` changes, then `welcome`, then any orders for that member that are neither `done` nor `cannot` (the latest ten), then `status` to everyone.
 - **A link that proved no key**, or a credential that was revoked, gets `refused`.
 - **An observer** gets `observing`, the mission's welcome payloads, a `status`, and the positions already known. After that it gets every `status`, `positions`, `order` and `note`. Nothing an observer sends has any effect, except `bye`.
+- **`leave`**, and the leader removing a member: the member comes off the roster, its credential is revoked and its position forgotten. Everyone still linked gets a `notice`, then the new `status`. A device that only loses its link, or sends `bye`, stays on the roster.
 - **Check fire** raises the core's hold. Only the leader's own device lifts it; no message does.
 - **Holds** in a `status` are the core's and the mission's together. Nothing a mission or a message does removes a core hold.
-- A message a member is not allowed to send (`welcome`, `status`, `order`, and so on) is ignored.
+- A message a member is not allowed to send (`welcome`, `status`, `order`, `notice`, and so on) is ignored.
 
 ## 6. Missions
 
@@ -205,6 +209,7 @@ Every link has a **link key** and a name for it, which is the TLS pre-shared key
 - The leader's listener holds a key for every credential that isn't revoked, every invite that is open, and the typed code while it is open. A device whose key isn't there fails the TLS handshake.
 - **The `link` frame.** The leader's TLS library picks the key by the identity but doesn't say which it picked, so the device's first frame says: `id` is the identity and `proof` is `HMAC-SHA256(key: link key, message: "squad link proof v1" + exporter)`, where `exporter` is 32 bytes of TLS exported keying material (RFC 5705) with the label `squad link v1` and no context. The leader checks the proof with the key it holds under that name and drops the link if it fails. A member can't name another member's credential, because it can't make that proof.
 - A listener's keys are fixed when it starts. When the keys change (a device joined, a member was removed, joining opened or closed) the leader starts a new listener on the same port; links that are up stay up. A device that connects in that moment is refused and tries again.
+- A device that is joining looks for the squad for 20 seconds in all. If the invite names a relay and the relay can't be reached at all, it goes back to looking on the local network rather than giving up: a phone that has just asked its owner whether the app may use the local network reaches nothing until they answer.
 - A device that has not connected within 8 seconds gives up that attempt. After a drop it retries with a delay that doubles from 1 second to 8. If the leader's device turns its credential down three times running without ever linking, it stops and says to ask for a new invite.
 
 What this does not protect against: someone who holds a member's device, or the leader's. And the six-character code is only as strong as six characters; use the QR code.

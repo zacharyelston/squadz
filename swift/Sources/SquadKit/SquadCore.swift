@@ -59,6 +59,9 @@ public struct SquadCore<M: Mission> {
     /// Orders sent this session, oldest first, and each recipient's latest answer.
     public private(set) var orders: [Order] = []
     public private(set) var acks: [UUID: [MemberID: OrderAck.Response]] = [:]
+    /// What the squad was told, oldest first: members leaving or being removed.
+    public private(set) var notices: [Notice] = []
+    static var maxNoticesKept: Int { 50 }
     static var maxOrdersKept: Int { 100 }
     static var maxNotesKept: Int { 100 }
 
@@ -174,6 +177,9 @@ public struct SquadCore<M: Mission> {
         case .bye:
             peers[peer] = nil
             return []
+        case .leave:
+            let name = squad.members.first { $0.id == member }?.name ?? "A member"
+            return drop(member, notice: Notice(kind: .left, text: "\(name) left the squad.", member: member, time: now), now: now)
         case var .position(p):
             p.member = member
             positions[member] = p
@@ -197,7 +203,7 @@ public struct SquadCore<M: Mission> {
             let core = view
             return finish(mission.handle(m.payload, from: member, peer: peer, core: core, now: now), now: now)
         case .hello, .link, .seal, .fileOffer, .fileChunk, .fileDone, .enrolled, .leaderKey, .welcome, .observing, .refused,
-             .status, .order, .receipt, .positions:
+             .status, .order, .receipt, .positions, .notice:
             return []   // the leader's own messages from a phone, or files (a squad doesn't take them): ignored
         }
     }
@@ -295,11 +301,20 @@ public struct SquadCore<M: Mission> {
     /// Takes a member off the roster and revokes their credential: their link closes and their
     /// device can't connect again without a new invite.
     public mutating func removeMember(_ member: MemberID, now: Date) -> [Outgoing] {
+        guard let name = squad.members.first(where: { $0.id == member })?.name else { return [] }
+        return drop(member, notice: Notice(kind: .removed, text: "\(name) was removed from the squad.", member: member, time: now), now: now)
+    }
+
+    /// Off the roster, credential revoked, and everyone who is left told why.
+    private mutating func drop(_ member: MemberID, notice: Notice, now: Date) -> [Outgoing] {
         let ids = Set(credentials.filter { $0.member == member }.map(\.id))
         let closing = revoke(ids)
         squad.members.removeAll { $0.id == member }
         positions[member] = nil
-        return closing + changed(now: now)
+        notices.append(notice)
+        if notices.count > Self.maxNoticesKept { notices.removeFirst(notices.count - Self.maxNoticesKept) }
+        let told = (Array(peers.keys) + Array(observers)).sorted { $0.raw < $1.raw }.map { Outgoing(to: $0, .notice(notice)) }
+        return closing + told + changed(now: now)
     }
 
     /// Revokes one credential: an observer's, or a member's (which also takes them off the roster).

@@ -30,6 +30,8 @@ public struct SquadMessage: Equatable, Sendable {
         // Member's phone → leader
         case hello(Hello)
         case bye
+        /// Leaving for good: the leader takes the member off the squad and tells everyone.
+        case leave
         case position(MemberPosition)
         case orderAck(OrderAck)
         /// Anyone → leader.
@@ -56,6 +58,8 @@ public struct SquadMessage: Equatable, Sendable {
         case receipt(Receipt)
         /// Leader → observers.
         case positions(PositionsReport)
+        /// Leader → everyone: something to tell people, like a member leaving.
+        case notice(Notice)
 
         /// Either way: a mission's own message.
         case mission(MissionMessage)
@@ -76,6 +80,8 @@ extension SquadMessage: Codable {
         case .leaderKey: return "leaderKey"
         case .hello: return "hello"
         case .bye: return "bye"
+        case .leave: return "leave"
+        case .notice: return "notice"
         case .position: return "position"
         case .orderAck: return "orderAck"
         case .checkFire: return "checkFire"
@@ -100,7 +106,8 @@ extension SquadMessage: Codable {
         try c.encode(seq, forKey: .seq)
         try c.encode(type, forKey: .type)
         switch body {
-        case .bye: break
+        case .bye, .leave: break
+        case let .notice(x): try c.encode(x, forKey: .body)
         case let .link(x): try c.encode(x, forKey: .body)
         case let .seal(x): try c.encode(x, forKey: .body)
         case let .enrolled(x): try c.encode(x, forKey: .body)
@@ -137,6 +144,8 @@ extension SquadMessage: Codable {
         case "leaderKey": body = .leaderKey(try value())
         case "hello": body = .hello(try value())
         case "bye": body = .bye
+        case "leave": body = .leave
+        case "notice": body = .notice(try value())
         case "position": body = .position(try value())
         case "orderAck": body = .orderAck(try value())
         case "checkFire": body = .checkFire(try value())

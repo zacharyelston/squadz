@@ -79,6 +79,37 @@ public struct CheckFire: Codable, Equatable, Hashable, Sendable {
     }
 }
 
+/// Leader → everyone: something that happened to the squad and is worth telling people, like a
+/// member leaving. Nothing acts on a notice; it is for people to read.
+public struct Notice: Codable, Equatable, Sendable, Identifiable {
+    /// A device that doesn't know a kind shows the notice's text.
+    public struct Kind: RawRepresentable, Codable, Hashable, Sendable {
+        public let rawValue: String
+        public init(rawValue: String) { self.rawValue = rawValue }
+
+        /// The member left of their own accord.
+        public static let left = Kind(rawValue: "left")
+        /// The leader took the member off the squad.
+        public static let removed = Kind(rawValue: "removed")
+    }
+
+    public var id: UUID
+    public var kind: Kind
+    /// For people, like "Ana left the squad."
+    public var text: String
+    /// Who it is about, if anyone. They may no longer be on the roster.
+    public var member: MemberID?
+    public var time: Date
+
+    public init(id: UUID = UUID(), kind: Kind, text: String, member: MemberID? = nil, time: Date) {
+        self.id = id
+        self.kind = kind
+        self.text = text
+        self.member = member
+        self.time = time
+    }
+}
+
 /// The leader's order to one member, several, or the whole squad.
 public struct Order: Codable, Equatable, Sendable, Identifiable {
     /// The core's kinds are below. A mission adds its own by extending this type and listing

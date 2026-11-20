@@ -16,6 +16,8 @@ enum RelayLink {
     static let ticketRefused = "The relay didn't accept this device."
     static let slow = "The relay is turning this network away for a few minutes."
     static let wrongCertificate = "The relay didn't show the certificate this squad expects."
+    /// How a failure to get to the relay at all starts: no network, or not allowed onto it yet.
+    static let unreachable = "Couldn't reach the relay"
 }
 
 /// One WebSocket to a relay. Text messages are the relay's own (JSON); binary ones are a squad's.
@@ -130,7 +132,7 @@ final class RelaySocket {
 
     static func describe(_ error: NWError) -> String {
         if case .tls = error { return RelayLink.wrongCertificate }
-        return "Couldn't reach the relay (\(error))."
+        return "\(RelayLink.unreachable) (\(error))."
     }
 }
 

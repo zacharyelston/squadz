@@ -629,11 +629,21 @@ public final class SquadEnroller {
         queue.asyncAfter(deadline: .now() + timeout) { [weak self] in
             guard let self else { return }
             if let joined = self.pending { return self.finish(.success(joined)) }
-            self.finish(.failure(SquadLinkFailure(relay == nil
+            let allow = " If this device asked to find devices on your local network, allow it and try again."
+            self.finish(.failure(SquadLinkFailure((relay == nil
                 ? "Couldn't reach \(self.squadName). Is its leader's device nearby and on the same network?"
-                : "Couldn't reach \(self.squadName), on this network or through its relay.")))
+                : "Couldn't reach \(self.squadName), on this network or through its relay.") + allow)))
         }
         if let fixedEndpoint { return connect(to: fixedEndpoint) }
+        search()
+    }
+
+    /// Looks for the squad on this network and, if the invite names a relay, turns to it after
+    /// `relayAfter`. If the relay can't be reached either, it looks here again, and so on until
+    /// the time is up: a device that has just been asked whether the app may use the local
+    /// network reaches nothing until the person answers, and then finds the squad at once.
+    private func search() {
+        guard !finished, connection == nil, joiner == nil else { return }
         finder.find(tag: invite?.tag, name: squadName, service: service, queue: queue) { [weak self] found in
             guard let self, self.connection == nil, self.joiner == nil else { return }
             switch found {
@@ -641,7 +651,7 @@ public final class SquadEnroller {
             case let .failure(why): self.finish(.failure(why))
             }
         }
-        guard let relay, let invite else { return }
+        guard let invite, let relay = invite.relay else { return }
         queue.asyncAfter(deadline: .now() + relayAfter) { [weak self] in
             guard let self, !self.finished, self.connection == nil, self.joiner == nil else { return }
             // Not on this network: get a ticket from the relay, then join through it.
@@ -650,6 +660,8 @@ public final class SquadEnroller {
                 switch result {
                 case let .success(ticket):
                     self.run(SquadConnection(through: ticket, squad: invite.squad, key: self.key, queue: self.queue), ticket: ticket)
+                case let .failure(why) where why.reason.hasPrefix(RelayLink.unreachable):
+                    self.search()
                 case let .failure(why):
                     self.finish(.failure(why))
                 }
@@ -822,10 +834,19 @@ public final class SquadLinkClient {
         connection?.send(body)
     }
 
-    /// Leaves: says bye and stops reconnecting.
-    public func stop() {
+    /// Stops reconnecting, and says so first if the link is up.
+    /// - Parameter forGood: this device is leaving the squad, not just closing the app: the
+    ///   leader's device takes it off the squad and tells everyone. Its credential stops working.
+    public func stop(forGood: Bool = false) {
         guard running else { return }
-        if status == .connected { connection?.send(.bye) }
+        if status == .connected, let c = connection {
+            // Let the goodbye go before the link closes; closing first can lose it.
+            connection = nil
+            c.onState = nil
+            c.onMessage = nil
+            c.send(forGood ? .leave : .bye, thenClose: true)
+            queue.asyncAfter(deadline: .now() + 2) { c.cancel() }
+        }
         running = false
         tearDown()
         set(.stopped("Left"))

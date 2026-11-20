@@ -39,6 +39,8 @@ enum Samples {
                                leader: bytes(7, 65), signature: bytes(8, 64))),
             .leaderKey(LeaderKeyChange(squad: squad.id, key: bytes(9, 65), time: t, signature: bytes(8, 64))),
             .bye,
+            .leave,
+            .notice(Notice(id: uuid(12), kind: .left, text: "Ana left the squad.", member: ana.id, time: t)),
             .position(MemberPosition(at: origin, accuracy: 3, heading: 12, time: t)),
             .orderAck(OrderAck(order: uuid(5), response: .done)),
             .checkFire(CheckFire(id: uuid(6), by: "Ana")),
@@ -62,7 +64,7 @@ enum Samples {
         ]
         for body in all {
             switch body {   // exhaustive on purpose
-            case .link, .seal, .enrolled, .leaderKey, .hello, .bye, .position, .orderAck, .checkFire, .note, .fileOffer, .fileChunk, .fileDone,
+            case .link, .seal, .enrolled, .leaderKey, .hello, .bye, .leave, .notice, .position, .orderAck, .checkFire, .note, .fileOffer, .fileChunk, .fileDone,
                  .welcome, .observing, .refused, .status, .order, .receipt, .positions, .mission: break
             }
         }

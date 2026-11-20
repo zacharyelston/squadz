@@ -35,6 +35,39 @@ final class SquadCoreTests: XCTestCase {
         XCTAssertEqual(y.lastStatus("Watcher")?.holds, [])
     }
 
+    func testLeavingTakesAMemberOffTheSquadAndTellsEveryone() throws {
+        let y = Yard(mission: NoMission())
+        let ana = try XCTUnwrap(y.join("Ana"))
+        let ben = try XCTUnwrap(y.join("Ben"))
+        y.join("Watcher", role: .observer)
+        func told(_ who: String, _ kind: Notice.Kind, about member: MemberID, _ text: String) -> Bool {
+            y.has(who) { if case let .notice(n) = $0 { return n.kind == kind && n.member == member && n.text == text }; return false }
+        }
+
+        y.send("Ana", .position(MemberPosition(at: origin, accuracy: 3, time: y.now)))
+        y.send("Ana", .leave)
+        XCTAssertEqual(y.host.squad.members.map(\.id), [ben])
+        XCTAssertNil(y.host.positions[ana])
+        XCTAssertTrue(told("Ben", .left, about: ana, "Ana left the squad."))
+        XCTAssertTrue(told("Watcher", .left, about: ana, "Ana left the squad."))
+        XCTAssertEqual(y.lastStatus("Ben")?.squad.members.map(\.name), ["Ben"])
+        XCTAssertEqual(y.host.notices.map(\.kind), [.left], "kept for the leader's own screen")
+        XCTAssertEqual(y.host.credentials.first { $0.member == ana }?.revoked, true, "her credential is no use to anyone who finds it")
+
+        // Closing the app is not leaving: still on the squad, and nobody is told.
+        y.send("Ben", .bye)
+        XCTAssertEqual(y.host.squad.members.map(\.id), [ben])
+        XCTAssertEqual(y.host.notices.count, 1)
+
+        // The leader removing someone tells the squad too. A notice from a phone does nothing.
+        XCTAssertEqual(y.join("Ben"), ben)
+        y.send("Ben", .notice(Notice(kind: .left, text: "The leader left the squad.", time: y.now)))
+        XCTAssertEqual(y.host.notices.count, 1)
+        y.command { $0.removeMember(ben, now: $1) }
+        XCTAssertTrue(told("Watcher", .removed, about: ben, "Ben was removed from the squad."))
+        XCTAssertTrue(y.host.squad.members.isEmpty)
+    }
+
     func testJoinCodesRejoinAndRemoval() throws {
         let y = Yard(mission: NoMission())
         // A link the transport hasn't vouched for can't join.
