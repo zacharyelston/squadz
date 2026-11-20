@@ -76,6 +76,8 @@ final class AppModel {
     private(set) var orders: [Order] = []
     /// On the leader's device: each recipient's latest answer to each order.
     private(set) var answers: [UUID: [MemberID: OrderAck.Response]] = [:]
+    /// Called on a member's phone when an order it didn't have arrives: the app buzzes.
+    var orderArrived: ((Order) -> Void)?
     /// On a member's phone: what it answered.
     private(set) var myAnswers: [UUID: OrderAck.Response] = [:]
     /// Orders the leader took back.
@@ -376,6 +378,42 @@ final class AppModel {
     /// Orders still to be carried out, newest first: for the map, and for a member's card.
     var openOrders: [Order] { orders.filter { !isSettled($0) } }
 
+    /// How an order stands, for its colour.
+    enum OrderTone: Equatable {
+        /// For the whole squad, and not yet seen.
+        case team
+        /// For particular people, and not yet seen.
+        case personal
+        case seen
+        case cannot
+    }
+
+    /// On a phone, by what it answered. On the leader's device, by what everyone it was for
+    /// answered: seen once they all have, can't once they all said so.
+    func tone(of order: Order) -> OrderTone {
+        let fresh: OrderTone = order.to == nil ? .team : .personal
+        switch role {
+        case .member:
+            switch myAnswers[order.id] {
+            case .cannot: return .cannot
+            case .seen, .done: return .seen
+            case nil: return fresh
+            }
+        case .leader:
+            let given = recipients(of: order).map { answers[order.id]?[$0.id] }
+            if given.isEmpty { return fresh }
+            if given.allSatisfy({ $0 == .cannot }) { return .cannot }
+            if given.allSatisfy({ $0 != nil }) { return .seen }
+            return fresh
+        case .none:
+            return fresh
+        }
+    }
+
+    /// On a member's phone: the newest order it hasn't answered at all, to put in front of them
+    /// wherever they are in the app.
+    var newOrder: Order? { openOrders.first { myAnswers[$0.id] == nil } }
+
     /// The same orders in the order they came, oldest first: what to do next is first.
     var queue: [Order] { openOrders.reversed() }
 
@@ -508,6 +546,7 @@ final class AppModel {
             guard let me, o.isFor(me), !orders.contains(where: { $0.id == o.id }) else { break }
             orders.insert(o, at: 0)
             orders.sort { $0.time > $1.time }
+            orderArrived?(o)
         case let .orderCancel(id):
             cancelledOrders.insert(id)
         default:

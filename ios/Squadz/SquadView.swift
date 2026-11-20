@@ -89,9 +89,9 @@ struct SquadView: View {
         TabView(selection: $memberTab) {
             VStack(spacing: 0) {
                 banners
-                if let next = model.queue.first {
-                    Button { memberTab = .orders } label: { NextOrderLine(order: next, waiting: model.queue.count) }
-                        .buttonStyle(.plain)
+                // A new order comes to the front here; once it's seen, the next one to do shows.
+                if let shown = model.newOrder ?? model.queue.first {
+                    NextOrderLine(order: shown, isNew: model.newOrder != nil, waiting: model.queue.count) { memberTab = .orders }
                 }
                 TimelineView(.periodic(from: .now, by: 15)) { context in
                     VStack(spacing: 0) {
@@ -102,6 +102,9 @@ struct SquadView: View {
                         }
                     }
                 }
+            }
+            .onAppear {
+                model.orderArrived = { _ in UINotificationFeedbackGenerator().notificationOccurred(.warning) }
             }
             .tabItem { Label("Map", systemImage: "map") }
             .tag(MemberTab.map)
@@ -172,7 +175,7 @@ struct SquadView: View {
     /// Open orders that have a place, and the place of the order being written.
     private var places: [SquadMap.Place] {
         var out = model.openOrders.compactMap { order in
-            order.at.map { SquadMap.Place(id: order.id, title: order.title, at: $0) }
+            order.at.map { SquadMap.Place(id: order.id, title: order.title, at: $0, color: UIColor(model.tone(of: order).color)) }
         }
         if leading, showsList, panel == .orders, draft.needsPlace, let place = draft.place {
             out.append(SquadMap.Place(id: OrderDraft.pinID, title: "New order", at: place, isDraft: true))

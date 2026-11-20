@@ -157,6 +157,8 @@ struct OrdersPanel: View {
     private func sent(_ order: Order) -> some View {
         VStack(alignment: .leading, spacing: 3) {
             HStack {
+                Image(systemName: "flag.fill").font(.footnote)
+                    .foregroundStyle(model.isSettled(order) ? Color.secondary : model.tone(of: order).color)
                 Text(order.title).fontWeight(.semibold)
                 Spacer()
                 Text(order.time.formatted(date: .omitted, time: .shortened)).font(.footnote).foregroundStyle(.secondary)
@@ -183,31 +185,66 @@ struct OrdersPanel: View {
     }
 }
 
-/// On a member's phone, over the map: the order to do next, in one line. Tapping it opens the
-/// orders tab.
+extension AppModel.OrderTone {
+    /// Blue for the whole squad's, red for yours, yellow once seen, grey for can't.
+    var color: Color {
+        switch self {
+        case .team: .blue
+        case .personal: .red
+        case .seen: .yellow
+        case .cannot: .gray
+        }
+    }
+}
+
+/// On a member's phone, over the map: an order that has just come in, or the next one to do, in
+/// one line. A new one can be marked seen right here. Tapping the line opens the orders tab.
 struct NextOrderLine: View {
     @Environment(AppModel.self) private var model
     let order: Order
+    /// Not answered at all yet.
+    let isNew: Bool
     /// How many orders are waiting, this one included.
     let waiting: Int
+    let open: () -> Void
 
     var body: some View {
-        HStack {
-            Label(order.title, systemImage: "flag.fill").font(.subheadline.weight(.semibold))
-            if let place = order.at, let mine = model.located.first(where: { $0.isMe })?.position?.at {
-                Text("\(MemberList.length(Geo.distance(mine, place))) \(MemberList.compass(Geo.bearing(from: mine, to: place)))")
-                    .font(.subheadline)
-            } else if !order.text.isEmpty {
-                Text(order.text).font(.subheadline).lineLimit(1)
+        let tone = model.tone(of: order).color
+        HStack(spacing: 8) {
+            Button(action: open) {
+                HStack(spacing: 8) {
+                    Image(systemName: "flag.fill").foregroundStyle(tone)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(isNew ? "New order: \(order.title)" : order.title).font(.subheadline.weight(.semibold))
+                        Text(detail).font(.footnote).foregroundStyle(.secondary).lineLimit(1)
+                    }
+                    Spacer()
+                    if waiting > 1 { Text("\(waiting) waiting").font(.caption).foregroundStyle(.secondary) }
+                }
+                .contentShape(.rect)
             }
-            Spacer()
-            if waiting > 1 { Text("+\(waiting - 1) more").font(.caption).foregroundStyle(.secondary) }
-            Image(systemName: "chevron.right").font(.caption).foregroundStyle(.secondary)
+            .buttonStyle(.plain)
+            if isNew {
+                Button("Seen") { model.answer(order, .seen) }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+            } else {
+                Image(systemName: "chevron.right").font(.caption).foregroundStyle(.secondary)
+            }
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 9)
-        .background(.orange.opacity(0.22))
-        .contentShape(.rect)
+        .padding(.vertical, 8)
+        .background(tone.opacity(isNew ? 0.3 : 0.2))
+        .overlay(alignment: .leading) { Rectangle().fill(tone).frame(width: 5) }
+    }
+
+    private var detail: String {
+        var parts = [order.to == nil ? "Whole squad" : "For you"]
+        if let place = order.at, let mine = model.located.first(where: { $0.isMe })?.position?.at {
+            parts.append("\(MemberList.length(Geo.distance(mine, place))) \(MemberList.compass(Geo.bearing(from: mine, to: place)))")
+        }
+        if !order.text.isEmpty, order.kind.coreTitle != nil { parts.append(order.text) }
+        return parts.joined(separator: " · ")
     }
 }
 
@@ -261,7 +298,8 @@ struct OrderCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .firstTextBaseline) {
-                Label(order.title, systemImage: "flag.fill").font(.headline)
+                Label { Text(order.title) } icon: { Image(systemName: "flag.fill").foregroundStyle(model.tone(of: order).color) }
+                    .font(.headline)
                 if isNext {
                     Text("Next").font(.caption.weight(.bold)).padding(.horizontal, 7).padding(.vertical, 2)
                         .background(.orange, in: .capsule).foregroundStyle(.white)
@@ -292,6 +330,7 @@ struct OrderCard: View {
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(isNext ? Color.orange.opacity(0.18) : Color.clear)
+        .background(model.tone(of: order).color.opacity(isNext ? 0.22 : 0.12))
+        .overlay(alignment: .leading) { Rectangle().fill(model.tone(of: order).color).frame(width: 5) }
     }
 }

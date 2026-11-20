@@ -197,9 +197,15 @@ final class ModelTests: XCTestCase {
         XCTAssertEqual(OrdersPanel.answers(to: order, from: ana.recipients(of: order), given: ana.answers[order.id] ?? [:]), "Ben: no answer yet")
         XCTAssertFalse(ana.isSettled(order))
 
-        // Seen keeps it open on both; Done settles it on both.
+        // New and for him alone: put in front of him, and red on both. Seen keeps it open, and turns it yellow.
+        XCTAssertEqual(ben.newOrder?.id, order.id)
+        XCTAssertEqual(ben.tone(of: order), .personal)
+        XCTAssertEqual(ana.tone(of: order), .personal)
         ben.answer(order, .seen)
         try await wait("the leader sees Seen") { ana.answers[order.id]?[benID] == .seen }
+        XCTAssertNil(ben.newOrder)
+        XCTAssertEqual(ben.tone(of: order), .seen)
+        XCTAssertEqual(ana.tone(of: order), .seen)
         XCTAssertEqual(ben.openOrders.count, 1)
         XCTAssertEqual(ana.openOrders.count, 1)
         ben.answer(order, .done)
@@ -211,6 +217,8 @@ final class ModelTests: XCTestCase {
         // To the whole squad, newest first on both.
         XCTAssertTrue(ana.sendOrder(.note, text: "Back by five"))
         try await wait("Ben has the note") { ben.orders.count == 2 }
+        XCTAssertEqual(ben.newOrder?.text, "Back by five")
+        XCTAssertEqual(ben.tone(of: try XCTUnwrap(ben.newOrder)), .team)
         XCTAssertEqual(ben.orders.first?.text, "Back by five")
         XCTAssertEqual(ana.orders.first?.text, "Back by five")
         // A new move for the same people replaces the old one; an order can also be taken back.
@@ -232,7 +240,9 @@ final class ModelTests: XCTestCase {
         XCTAssertEqual(ben.queue.map(\.text), ["Back by five", "By the gate"])
         ben.answer(try XCTUnwrap(ben.queue.first), .done)
         XCTAssertEqual(ben.queue.map(\.text), ["By the gate"])
-        ben.answer(try XCTUnwrap(ben.queue.first), .cannot)
+        let gate = try XCTUnwrap(ben.queue.first)
+        ben.answer(gate, .cannot)
+        XCTAssertEqual(ben.tone(of: gate), .cannot)
         XCTAssertTrue(ben.queue.isEmpty)
         XCTAssertEqual(ben.orders.count, 5, "answered and cancelled orders stay in the list")
         try await wait("the leader sees Can't") { ana.openOrders.isEmpty }

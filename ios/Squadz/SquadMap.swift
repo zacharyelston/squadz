@@ -22,6 +22,7 @@ struct SquadMap: UIViewRepresentable {
         var at: GeoPoint
         /// Still being written: shown in another colour.
         var isDraft = false
+        var color: UIColor = .systemOrange
     }
 
     func makeCoordinator() -> Coordinator { Coordinator() }
@@ -53,6 +54,7 @@ struct SquadMap: UIViewRepresentable {
             pin.coordinate = CLLocationCoordinate2D(latitude: place.at.latitude, longitude: place.at.longitude)
             pin.title = place.title
             pin.isDraft = place.isDraft
+            pin.color = place.color
             if let view = map.view(for: pin) as? MKMarkerAnnotationView { Coordinator.style(view, pin) }
         }
         for (id, pin) in c.places where !marked.contains(id) {
@@ -114,6 +116,7 @@ struct SquadMap: UIViewRepresentable {
     final class PlacePin: MKPointAnnotation {
         let id: UUID
         var isDraft = false
+        var color: UIColor = .systemOrange
         init(id: UUID) { self.id = id }
     }
 
@@ -131,7 +134,7 @@ struct SquadMap: UIViewRepresentable {
         }
 
         static func style(_ view: MKMarkerAnnotationView, _ pin: PlacePin) {
-            view.markerTintColor = pin.isDraft ? .systemPurple : .systemOrange
+            view.markerTintColor = pin.isDraft ? .systemPurple : pin.color
             view.glyphImage = UIImage(systemName: "flag.fill")
             view.titleVisibility = .visible
             view.displayPriority = .required
