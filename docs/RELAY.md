@@ -11,8 +11,10 @@ The relay is a pipe. The leader's device is still the squad: it holds the roster
 | **Stores** | For each squad: its ID, the hash of the leader's token, the hash of each device's token, the hash of each open invite's relay key and when it expires, and two timestamps. Nothing else |
 | **Doesn't store** | Names, rosters, positions, orders, notes, or any secret a device presents |
 | **Can't do** | Let a device into a squad. A ticket from the relay only opens a link to the leader's device, which asks for the member's credential as it does on the local network |
-| **Can do, today** | Read everything it carries. Frames are not yet sealed end to end: that is V4. Until then, use a relay you run or trust as you would trust the network itself |
-| **Can do, today** | Join a squad while someone is joining through it, by answering in their place. Sealed frames close this too. A device that joins on the local network is not exposed to it |
+| **Can't do** | Read what it carries. Every frame on a link is sealed between the device and the leader's device ([WIRE.md](WIRE.md) §9), a request to join and its answer included. It can't change, drop, reorder, repeat or add a frame without the link ending |
+| **Can't do** | Join a squad in place of a device that is joining through it. It never has the invite's secret, only a value derived from it one way |
+| **Sees** | Which squads have a room and when their devices are connected, from which addresses; which key a device names on each link (a credential's ID, which is not secret); and the size and timing of every frame |
+| **Can do** | Refuse to carry a squad, or drop its links. A squad on one network doesn't need it |
 
 ## For a squad's leader
 
@@ -93,19 +95,16 @@ When the leader's socket goes, every link into the room is closed. Members' devi
 
 ### A link
 
-The bytes on a link are exactly the local link's: SquadKit frames ([WIRE.md](WIRE.md) §1), starting with the `link` frame that proves which key the device holds (§8). On the local network that proof is tied to the TLS session. Here it is tied to `N`: 32 random bytes the relay makes for each link and gives to both ends.
+The bytes on a link are SquadKit frames ([WIRE.md](WIRE.md) §1), sealed between the two devices ([WIRE.md](WIRE.md) §9). Each end's first frame is a `seal` frame in the clear, carrying a nonce; every frame after it is ciphertext under keys made from the link key, the two nonces and `N`: 32 random bytes the relay makes for each link and gives to both ends. The relay never has the link key.
 
-```
-proof = HMAC-SHA256(link key, "squad link proof v1" + N)
-```
-
-The leader's device accepts the same keys it accepts locally, an invite's or a member credential's, and refuses the link otherwise. Through a relay a device counts itself connected only once the leader's device has answered.
+The leader's device accepts the same keys it accepts locally, an invite's or a member credential's, and refuses the link if the device's first sealed frame doesn't open. Through a relay a device counts itself connected only once the leader's device has answered.
 
 The relay pings every 20 seconds and closes a socket that says nothing, not even an answer to a ping, for 60.
 
 ## Tested, and not
 
 - `cd relay && cargo test`: 12 tests against real sockets on one machine. Rooms, tickets, invites and their expiry, the rate limit, a leader replaced, a device revoked, a squad ended, a restart on the same file, and the browser `Origin` rule.
-- `cd swift && swift test` starts the built relay with TLS and a certificate made for the run, and joins, links, removes and restarts through it with a pinned certificate. Without the relay binary those 9 tests are skipped.
+- `cd swift && swift test` starts the built relay with TLS and a certificate made for the run, and joins, links, removes and restarts through it with a pinned certificate. One more test runs a relay behind a tap that keeps every byte in and out of it, joins, sends a position, a note and an order, and checks that none of the names, places or words are in what the tap kept. Without the relay binary those 10 tests are skipped.
+- Five more Swift tests need no relay: they play a hostile carrier that swaps a joining device's request for its own, changes a frame, and plays a recorded link back.
 - By hand: the app in a simulator and a Mac stand-in for the second phone, each leading in turn, through a relay on the same Mac.
 - **Not tested:** a relay on another machine or on the internet, a phone on cellular (the "done when" of V3), a relay behind a proxy, the container, many squads at once, and any browser client (there isn't one yet).

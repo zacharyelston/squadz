@@ -310,6 +310,54 @@ final class SquadLinkTests: XCTestCase {
         XCTAssertFalse(statuses.contains { if case .reconnecting = $0 { return true }; return false }, "\(statuses)")
     }
 
+    func testLeavingForGoodReachesTheLeaderAndTheRestOfTheSquad() throws {
+        let leader = try leader()
+        let ana = try join(leader, name: "Ana")
+        let ben = try join(leader, name: "Ben")
+        let anaPhone = client(ana, name: "Ana", at: leader), benPhone = client(ben, name: "Ben", at: leader)
+        let linked = expectation(description: "both linked")
+        linked.expectedFulfillmentCount = 2
+        let told = expectation(description: "Ben is told")
+        anaPhone.onMessage = { m in if case .welcome = m.body { linked.fulfill() } }
+        benPhone.onMessage = { m in
+            if case .welcome = m.body { linked.fulfill() }
+            if case let .notice(n) = m.body, n.kind == .left, n.member == ana.member, n.text == "Ana left the squad." { told.fulfill() }
+        }
+        anaPhone.start()
+        benPhone.start()
+        wait(for: [linked], timeout: 10)
+
+        // The link closes right behind the goodbye; it must still arrive.
+        queue.sync { anaPhone.stop(forGood: true) }
+        wait(for: [told], timeout: 5)
+        XCTAssertEqual(leader.act { $0.squad.members.map(\.name) }, ["Ben"])
+
+        // Her old credential is refused.
+        let again = client(ana, name: "Ana", at: leader)
+        again.start()
+        XCTAssertEqual(waitForStop(again), SquadLinkClient.notAccepted)
+    }
+
+    /// A phone that has just been asked whether the app may use the local network reaches
+    /// nothing, the relay included, until the person answers. The join keeps looking for as long
+    /// as it has, rather than failing behind the question.
+    func testAJoinKeepsLookingWhenItsRelayCantBeReached() throws {
+        var invite = SquadInvite(squad: SquadID(), name: "Red", enrol: .random(16), leader: .random(32), expires: Date().addingTimeInterval(600))
+        invite.relay = RelayAddress(text: "wss://127.0.0.1:1")
+        let enroller = SquadEnroller(invite: invite, name: "Ana", device: UUID(), queue: queue)
+        enroller.timeout = 2
+        enroller.relayAfter = 0.2
+        let done = expectation(description: "gave up")
+        var result: Result<MemberCredential, SquadLinkFailure>?
+        enroller.onDone = { result = $0; done.fulfill() }
+        let began = Date()
+        queue.sync { enroller.start() }
+        wait(for: [done], timeout: 10)
+        guard case let .failure(why)? = result else { return XCTFail("joined a squad that isn't there") }
+        XCTAssertGreaterThan(Date().timeIntervalSince(began), 1.8, "gave up at the first refusal: \(why.reason)")
+        XCTAssertTrue(why.reason.hasPrefix("Couldn't reach Red, on this network or through its relay."), why.reason)
+    }
+
     /// A host that accepts TCP and never answers: joining must give up, not hang.
     func testAHandshakeThatNeverAnswersEndsTheJoin() throws {
         let silent = try NWListener(using: .tcp)

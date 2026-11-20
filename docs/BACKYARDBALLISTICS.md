@@ -76,3 +76,12 @@ The shared join code is gone as a key. [`WIRE.md`](WIRE.md) §7 and §8 are the 
 - **The Theater door** (contributor credentials) is not in this package: it is a different host, and it can use `LeaderKeys`, `SealedCredential` and `LinkKey` the same way.
 - Not done here: the LoRa epoch key and its re-key on removal (SQUAD_COMMS Part 2).
 
+## Added since, in the core
+
+Things the Squadz app needed that BackyardBallistics will find in the package when it moves over. Each is in [`WIRE.md`](WIRE.md).
+
+- **`leave`** and **`notice`:** a member leaving for good is taken off the roster and everyone is told. `bye` still means the app is closing. `SquadLinkClient.stop(forGood:)` sends one or the other.
+- **`orderCancel`:** `core.cancelOrder(_:now:)` takes an order back.
+- **Shared notes:** `SquadCore.sharesNotes` passes each note to the other members, as `sharesPositions` does for positions. It is off unless asked for, so golf's notes still go to the leader and the Theater only.
+- **`status.reportEvery`:** `core.setReportEvery(_:now:)` sets how often devices send positions. Golf's 15-second "no recent position" hold should stay above whatever rate it sets.
+- **Sealed links:** a link through a relay is sealed between the two devices ([`WIRE.md`](WIRE.md) §9). Nothing to do in an app; SquadLink does it.

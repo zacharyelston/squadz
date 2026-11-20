@@ -2,9 +2,11 @@
 
 The home of any squad: a core that every app can use, with missions as add-ons.
 
+![The leader's iPad: the squad on a map, with orders beside it](docs/images/commander-orders.png)
+
 A squad is a leader's device and its members' phones. Members share positions, get orders, send notes and can call check fire; the leader's device runs the squad and decides everything. What the squad is out doing (a round of golf, a search, a ski tour) is a **mission**, added on top without changing the core.
 
-The plan is [issue #2](https://github.com/zacharyelston/squadz/issues/2). This is steps V1, V2, V2b and V3 of it, and a first Squadz phone app on top. The original Squadz (a Rust server and a web page) is the tag `v1`.
+The plan is [issue #2](https://github.com/zacharyelston/squadz/issues/2). This is steps V1, V2, V2b, V3 and V4 of it, and the Squadz app for iPhone and iPad on top. The original Squadz (a Rust server and a web page) is the tag `v1`.
 
 | Part | Where | Status |
 | --- | --- | --- |
@@ -12,15 +14,26 @@ The plan is [issue #2](https://github.com/zacharyelston/squadz/issues/2). This i
 | **SquadLink**: SquadKit over the local network (Bonjour, TLS keyed per member), and through a relay | [`swift/Sources/SquadLink`](swift/Sources/SquadLink) | Built; tested on one Mac's loopback only |
 | **CoreGeo**: GPS points and small-area geometry | [`swift/Sources/CoreGeo`](swift/Sources/CoreGeo) | Built |
 | The wire format, for implementations in other languages | [`docs/WIRE.md`](docs/WIRE.md), [`testdata/wire`](testdata/wire) | Written, with vectors |
-| Join by QR, member credentials, the leader's identity key | SquadKit (`Credentials.swift`, `Invite.swift`), SquadLink, [`testdata/join`](testdata/join) | Built and tested on one Mac's loopback. No app scans or shows a QR code yet |
-| **Squadz for iPhone**: lead or join a squad, see everyone on a map | [`ios/`](ios) | Works in the simulator. Not yet run on a real phone |
-| **Relay**: carries a squad's links over the internet. Rust | [`relay/`](relay), [`docs/RELAY.md`](docs/RELAY.md) | Built and tested on one Mac. Not yet run on the internet. It can read what it carries until frames are sealed (V4) |
+| Join by QR, member credentials, the leader's identity key | SquadKit (`Credentials.swift`, `Invite.swift`), SquadLink, [`testdata/join`](testdata/join) | Built and tested. The app shows and scans the code; scanning was tried on a real iPhone |
+| **Squadz for iPhone and iPad**: lead or join a squad, see everyone on a map, send orders, share notes | [`ios/`](ios), [`docs/APP.md`](docs/APP.md) | Run on a real iPhone and iPad on one Wi-Fi network, and in the simulator. Not yet tried through the relay on real devices, or over cellular |
+| **Relay**: carries a squad's links over the internet. Rust | [`relay/`](relay), [`docs/RELAY.md`](docs/RELAY.md) | Built and tested on one Mac and on a second machine on the same network. Not yet run on the internet. It can't read what it carries: links through it are sealed between the two devices |
 
 SquadKit and SquadLink come from GroupKit and GroupLink in [BackyardBallistics](https://github.com/zacharyelston/BackyardBallistics), with golf taken out. BackyardBallistics does not use this package yet; [`docs/BACKYARDBALLISTICS.md`](docs/BACKYARDBALLISTICS.md) lists what it has to change to do so.
 
-## The iPhone app
+## The app
 
-One phone starts a squad and leads it; the others scan its invite code, confirm, and join. Everyone sees everyone on a map. The leader's phone *is* the squad: the others connect straight to it over Wi-Fi or a mesh, and there is no server. A squad started with a relay's address can also be reached over the internet ([`docs/RELAY.md`](docs/RELAY.md)).
+One device starts a squad and leads it; the others scan its invite code, confirm, and join. The leader's device *is* the squad: the others connect straight to it over Wi-Fi or a mesh, and there is no server. A squad started with a relay's address can also be reached over the internet ([`docs/RELAY.md`](docs/RELAY.md)).
+
+| A member's map | Orders, as a queue | Notes, as a chat |
+| --- | --- | --- |
+| ![A phone's map with the squad, order flags and a new order](docs/images/phone-map.png) | ![A phone's orders tab](docs/images/phone-orders.png) | ![A phone's notes tab](docs/images/phone-notes.png) |
+
+- **Everyone on a map.** Each pin is an arrow that points the way that device is pointing. The leader sets how often the squad's devices report, from every 2 seconds to every minute.
+- **Orders.** The leader sends one member, several, or the whole squad somewhere with a tap on the map, tells them to hold, or sends a note. Each answers Seen, Done or Can't, and the leader sees every answer. The leader can take an order back.
+- **Field notes.** A chat the whole squad reads and writes.
+- **Leaving and removing.** Either one tells the rest of the squad.
+
+[`docs/APP.md`](docs/APP.md) walks through every screen.
 
 Xcode 16 or later and [XcodeGen](https://github.com/yonaskolb/XcodeGen):
 
@@ -43,11 +56,13 @@ To run on a phone, pick your signing team in Xcode. It is not kept in the projec
 Known limits:
 
 - Positions are shared only while the app is open and in front.
+- Orders and notes are kept only while the leader's app is running. If it is closed and opened again, the squad and its members come back; what was sent and said does not.
 - The leader's phone has to stay on, in reach and with the app open. If it goes, the squad stops updating until it is back; nobody else can take over yet.
-- Without a relay, local network only: the same Wi-Fi, or a mesh that passes Bonjour (mDNS) between its nodes. With one, the relay can read what the squad sends until frames are sealed, and a phone that joined before the squad had a relay needs a new invite to use it.
+- Without a relay, local network only: the same Wi-Fi, or a mesh that passes Bonjour (mDNS) between its nodes. With one, the relay sees which devices are connected and how much they send, not what; and a phone that joined before the squad had a relay needs a new invite to use it.
 - The map is Apple's, which needs the internet for places the phone hasn't looked at before. Pins and the member list don't.
 - A phone is in one squad at a time. Leaving means asking for a new invite to come back.
 - Joining is by QR code or invite link. The typed code is in SquadKit but has no screen.
+- No photos yet: notes are text, and the core's capture order has no screen.
 
 ## Using it
 
@@ -106,4 +121,8 @@ cd relay && cargo build && cargo test
 cd swift && swift test
 ```
 
-The Swift tests that go through a relay start the one just built, and are skipped if it isn't there.
+```bash
+cd ios && xcodegen generate && xcodebuild -project Squadz.xcodeproj -scheme Squadz -destination 'platform=iOS Simulator,name=iPhone 18 Pro' test
+```
+
+The Swift tests that go through a relay start the one just built, and are skipped if it isn't there. As of this writing: 12 relay tests, 68 package tests and 8 app tests.

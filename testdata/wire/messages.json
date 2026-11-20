@@ -4,87 +4,107 @@
     "type" : "link"
   },
   {
-    "json" : "{\"body\":{\"device\":\"00000000-0000-4000-8000-000000000003\",\"key\":\"BgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgY=\",\"name\":\"Ana\",\"nonce\":\"AwMDAwMDAwMDAwMDAwMDAw==\"},\"seq\":2,\"type\":\"hello\",\"v\":7}",
+    "json" : "{\"body\":{\"id\":\"m:01010101010101010101010101010101\",\"nonce\":\"CgoKCgoKCgoKCgoKCgoKCg==\"},\"seq\":2,\"type\":\"seal\",\"v\":7}",
+    "type" : "seal"
+  },
+  {
+    "json" : "{\"body\":{\"nonce\":\"CwsLCwsLCwsLCwsLCwsLCw==\"},\"seq\":3,\"type\":\"seal\",\"v\":7}",
+    "type" : "seal"
+  },
+  {
+    "json" : "{\"body\":{\"device\":\"00000000-0000-4000-8000-000000000003\",\"key\":\"BgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgY=\",\"name\":\"Ana\",\"nonce\":\"AwMDAwMDAwMDAwMDAwMDAw==\"},\"seq\":4,\"type\":\"hello\",\"v\":7}",
     "type" : "hello"
   },
   {
-    "json" : "{\"body\":{\"device\":\"00000000-0000-4000-8000-000000000004\",\"name\":\"Watcher\",\"nonce\":\"AwMDAwMDAwMDAwMDAwMDAw==\",\"role\":\"observer\"},\"seq\":3,\"type\":\"hello\",\"v\":7}",
+    "json" : "{\"body\":{\"device\":\"00000000-0000-4000-8000-000000000004\",\"name\":\"Watcher\",\"nonce\":\"AwMDAwMDAwMDAwMDAwMDAw==\",\"role\":\"observer\"},\"seq\":5,\"type\":\"hello\",\"v\":7}",
     "type" : "hello"
   },
   {
-    "json" : "{\"body\":{\"credential\":{\"epoch\":0,\"id\":\"AQEBAQEBAQEBAQEBAQEBAQ==\",\"issued\":1800000000250,\"key\":\"BAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQ=\",\"sealed\":\"BQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUF\"},\"leader\":\"BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=\",\"member\":\"00000000-0000-4000-8000-000000000002\",\"name\":\"Red\",\"role\":\"member\",\"signature\":\"CAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICA==\",\"squad\":\"00000000-0000-4000-8000-000000000001\"},\"seq\":4,\"type\":\"enrolled\",\"v\":7}",
+    "json" : "{\"body\":{\"credential\":{\"epoch\":0,\"id\":\"AQEBAQEBAQEBAQEBAQEBAQ==\",\"issued\":1800000000250,\"key\":\"BAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQ=\",\"sealed\":\"BQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUF\"},\"leader\":\"BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=\",\"member\":\"00000000-0000-4000-8000-000000000002\",\"name\":\"Red\",\"role\":\"member\",\"signature\":\"CAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICA==\",\"squad\":\"00000000-0000-4000-8000-000000000001\"},\"seq\":6,\"type\":\"enrolled\",\"v\":7}",
     "type" : "enrolled"
   },
   {
-    "json" : "{\"body\":{\"key\":\"CQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQk=\",\"signature\":\"CAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICA==\",\"squad\":\"00000000-0000-4000-8000-000000000001\",\"time\":1800000000250},\"seq\":5,\"type\":\"leaderKey\",\"v\":7}",
+    "json" : "{\"body\":{\"key\":\"CQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQk=\",\"signature\":\"CAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICA==\",\"squad\":\"00000000-0000-4000-8000-000000000001\",\"time\":1800000000250},\"seq\":7,\"type\":\"leaderKey\",\"v\":7}",
     "type" : "leaderKey"
   },
   {
-    "json" : "{\"seq\":6,\"type\":\"bye\",\"v\":7}",
+    "json" : "{\"seq\":8,\"type\":\"bye\",\"v\":7}",
     "type" : "bye"
   },
   {
-    "json" : "{\"body\":{\"accuracy\":3,\"at\":{\"latitude\":42.36,\"longitude\":-71.06},\"heading\":12,\"time\":1800000000250},\"seq\":7,\"type\":\"position\",\"v\":7}",
+    "json" : "{\"seq\":9,\"type\":\"leave\",\"v\":7}",
+    "type" : "leave"
+  },
+  {
+    "json" : "{\"body\":{\"id\":\"00000000-0000-4000-8000-000000000012\",\"kind\":\"left\",\"member\":\"00000000-0000-4000-8000-000000000002\",\"text\":\"Ana left the squad.\",\"time\":1800000000250},\"seq\":10,\"type\":\"notice\",\"v\":7}",
+    "type" : "notice"
+  },
+  {
+    "json" : "{\"body\":{\"accuracy\":3,\"at\":{\"latitude\":42.36,\"longitude\":-71.06},\"heading\":12,\"time\":1800000000250},\"seq\":11,\"type\":\"position\",\"v\":7}",
     "type" : "position"
   },
   {
-    "json" : "{\"body\":{\"order\":\"00000000-0000-4000-8000-000000000005\",\"response\":\"done\"},\"seq\":8,\"type\":\"orderAck\",\"v\":7}",
+    "json" : "{\"body\":{\"order\":\"00000000-0000-4000-8000-000000000005\",\"response\":\"done\"},\"seq\":12,\"type\":\"orderAck\",\"v\":7}",
     "type" : "orderAck"
   },
   {
-    "json" : "{\"body\":{\"by\":\"Ana\",\"id\":\"00000000-0000-4000-8000-000000000006\"},\"seq\":9,\"type\":\"checkFire\",\"v\":7}",
+    "json" : "{\"body\":{\"by\":\"Ana\",\"id\":\"00000000-0000-4000-8000-000000000006\"},\"seq\":13,\"type\":\"checkFire\",\"v\":7}",
     "type" : "checkFire"
   },
   {
-    "json" : "{\"body\":{\"accuracy\":3,\"at\":{\"latitude\":42.36,\"longitude\":-71.06},\"author\":\"Ana\",\"field\":\"north-ridge\",\"id\":\"00000000-0000-4000-8000-000000000007\",\"photo\":\"AQI=\",\"text\":\"Hedge\",\"time\":1800000000250},\"seq\":10,\"type\":\"note\",\"v\":7}",
+    "json" : "{\"body\":{\"accuracy\":3,\"at\":{\"latitude\":42.36,\"longitude\":-71.06},\"author\":\"Ana\",\"field\":\"north-ridge\",\"id\":\"00000000-0000-4000-8000-000000000007\",\"photo\":\"AQI=\",\"text\":\"Hedge\",\"time\":1800000000250},\"seq\":14,\"type\":\"note\",\"v\":7}",
     "type" : "note"
   },
   {
-    "json" : "{\"body\":{\"field\":\"north-ridge\",\"group\":\"00000000-0000-4000-8000-000000000009\",\"id\":\"00000000-0000-4000-8000-000000000008\",\"kind\":\"capture\",\"name\":\"shot-1.jpg\",\"sha256\":\"ab\",\"size\":10},\"seq\":11,\"type\":\"fileOffer\",\"v\":7}",
+    "json" : "{\"body\":{\"field\":\"north-ridge\",\"group\":\"00000000-0000-4000-8000-000000000009\",\"id\":\"00000000-0000-4000-8000-000000000008\",\"kind\":\"capture\",\"name\":\"shot-1.jpg\",\"sha256\":\"ab\",\"size\":10},\"seq\":15,\"type\":\"fileOffer\",\"v\":7}",
     "type" : "fileOffer"
   },
   {
-    "json" : "{\"body\":{\"data\":\"AQID\",\"file\":\"00000000-0000-4000-8000-000000000008\",\"index\":0},\"seq\":12,\"type\":\"fileChunk\",\"v\":7}",
+    "json" : "{\"body\":{\"data\":\"AQID\",\"file\":\"00000000-0000-4000-8000-000000000008\",\"index\":0},\"seq\":16,\"type\":\"fileChunk\",\"v\":7}",
     "type" : "fileChunk"
   },
   {
-    "json" : "{\"body\":{\"file\":\"00000000-0000-4000-8000-000000000008\"},\"seq\":13,\"type\":\"fileDone\",\"v\":7}",
+    "json" : "{\"body\":{\"file\":\"00000000-0000-4000-8000-000000000008\"},\"seq\":17,\"type\":\"fileDone\",\"v\":7}",
     "type" : "fileDone"
   },
   {
-    "json" : "{\"body\":{\"member\":\"00000000-0000-4000-8000-000000000002\",\"squad\":{\"id\":\"00000000-0000-4000-8000-000000000001\",\"members\":[{\"device\":\"00000000-0000-4000-8000-000000000003\",\"id\":\"00000000-0000-4000-8000-000000000002\",\"name\":\"Ana\",\"role\":\"member\"}],\"name\":\"Red\"}},\"seq\":14,\"type\":\"welcome\",\"v\":7}",
+    "json" : "{\"body\":{\"member\":\"00000000-0000-4000-8000-000000000002\",\"squad\":{\"id\":\"00000000-0000-4000-8000-000000000001\",\"members\":[{\"device\":\"00000000-0000-4000-8000-000000000003\",\"id\":\"00000000-0000-4000-8000-000000000002\",\"name\":\"Ana\",\"role\":\"member\"}],\"name\":\"Red\"}},\"seq\":18,\"type\":\"welcome\",\"v\":7}",
     "type" : "welcome"
   },
   {
-    "json" : "{\"body\":{\"id\":\"00000000-0000-4000-8000-000000000001\",\"members\":[{\"device\":\"00000000-0000-4000-8000-000000000003\",\"id\":\"00000000-0000-4000-8000-000000000002\",\"name\":\"Ana\",\"role\":\"member\"}],\"name\":\"Red\"},\"seq\":15,\"type\":\"observing\",\"v\":7}",
+    "json" : "{\"body\":{\"id\":\"00000000-0000-4000-8000-000000000001\",\"members\":[{\"device\":\"00000000-0000-4000-8000-000000000003\",\"id\":\"00000000-0000-4000-8000-000000000002\",\"name\":\"Ana\",\"role\":\"member\"}],\"name\":\"Red\"},\"seq\":19,\"type\":\"observing\",\"v\":7}",
     "type" : "observing"
   },
   {
-    "json" : "{\"body\":{\"reason\":\"Joining is closed.\"},\"seq\":16,\"type\":\"refused\",\"v\":7}",
+    "json" : "{\"body\":{\"reason\":\"Joining is closed.\"},\"seq\":20,\"type\":\"refused\",\"v\":7}",
     "type" : "refused"
   },
   {
-    "json" : "{\"body\":{\"holds\":[{\"kind\":\"checkFire\",\"source\":\"core\",\"text\":\"Check fire, called by Ana.\"},{\"kind\":\"notAtRally\",\"member\":\"00000000-0000-4000-8000-000000000002\",\"source\":\"test.rally\",\"text\":\"Ana isn't at the rally point.\"}],\"missions\":[{\"id\":\"test.rally\",\"payload\":\"eyJyYWxseSI6bnVsbH0=\",\"version\":1}],\"revision\":4,\"squad\":{\"id\":\"00000000-0000-4000-8000-000000000001\",\"members\":[{\"device\":\"00000000-0000-4000-8000-000000000003\",\"id\":\"00000000-0000-4000-8000-000000000002\",\"name\":\"Ana\",\"role\":\"member\"}],\"name\":\"Red\"}},\"seq\":17,\"type\":\"status\",\"v\":7}",
+    "json" : "{\"body\":{\"holds\":[{\"kind\":\"checkFire\",\"source\":\"core\",\"text\":\"Check fire, called by Ana.\"},{\"kind\":\"notAtRally\",\"member\":\"00000000-0000-4000-8000-000000000002\",\"source\":\"test.rally\",\"text\":\"Ana isn't at the rally point.\"}],\"missions\":[{\"id\":\"test.rally\",\"payload\":\"eyJyYWxseSI6bnVsbH0=\",\"version\":1}],\"reportEvery\":5,\"revision\":4,\"squad\":{\"id\":\"00000000-0000-4000-8000-000000000001\",\"members\":[{\"device\":\"00000000-0000-4000-8000-000000000003\",\"id\":\"00000000-0000-4000-8000-000000000002\",\"name\":\"Ana\",\"role\":\"member\"}],\"name\":\"Red\"}},\"seq\":21,\"type\":\"status\",\"v\":7}",
     "type" : "status"
   },
   {
-    "json" : "{\"body\":{\"at\":{\"latitude\":42.36,\"longitude\":-71.06},\"id\":\"00000000-0000-4000-8000-000000000010\",\"kind\":\"moveTo\",\"text\":\"Left flank, by the shed\",\"time\":1800000000250,\"to\":[\"00000000-0000-4000-8000-000000000002\"]},\"seq\":18,\"type\":\"order\",\"v\":7}",
+    "json" : "{\"body\":{\"at\":{\"latitude\":42.36,\"longitude\":-71.06},\"id\":\"00000000-0000-4000-8000-000000000010\",\"kind\":\"moveTo\",\"text\":\"Left flank, by the shed\",\"time\":1800000000250,\"to\":[\"00000000-0000-4000-8000-000000000002\"]},\"seq\":22,\"type\":\"order\",\"v\":7}",
     "type" : "order"
   },
   {
-    "json" : "{\"body\":{\"id\":\"00000000-0000-4000-8000-000000000011\",\"kind\":\"test.rally.regroup\",\"text\":\"Regroup\",\"time\":1800000000250},\"seq\":19,\"type\":\"order\",\"v\":7}",
+    "json" : "{\"body\":{\"id\":\"00000000-0000-4000-8000-000000000011\",\"kind\":\"test.rally.regroup\",\"text\":\"Regroup\",\"time\":1800000000250},\"seq\":23,\"type\":\"order\",\"v\":7}",
     "type" : "order"
   },
   {
-    "json" : "{\"body\":{\"detail\":\"ok\",\"id\":\"00000000-0000-4000-8000-000000000007\",\"status\":\"stored\"},\"seq\":20,\"type\":\"receipt\",\"v\":7}",
+    "json" : "{\"body\":{\"order\":\"00000000-0000-4000-8000-000000000010\"},\"seq\":24,\"type\":\"orderCancel\",\"v\":7}",
+    "type" : "orderCancel"
+  },
+  {
+    "json" : "{\"body\":{\"detail\":\"ok\",\"id\":\"00000000-0000-4000-8000-000000000007\",\"status\":\"stored\"},\"seq\":25,\"type\":\"receipt\",\"v\":7}",
     "type" : "receipt"
   },
   {
-    "json" : "{\"body\":{\"positions\":[{\"accuracy\":2,\"at\":{\"latitude\":42.36,\"longitude\":-71.06},\"member\":\"00000000-0000-4000-8000-000000000002\",\"time\":1800000000250}],\"squad\":\"00000000-0000-4000-8000-000000000001\"},\"seq\":21,\"type\":\"positions\",\"v\":7}",
+    "json" : "{\"body\":{\"positions\":[{\"accuracy\":2,\"at\":{\"latitude\":42.36,\"longitude\":-71.06},\"member\":\"00000000-0000-4000-8000-000000000002\",\"time\":1800000000250}],\"squad\":\"00000000-0000-4000-8000-000000000001\"},\"seq\":26,\"type\":\"positions\",\"v\":7}",
     "type" : "positions"
   },
   {
-    "json" : "{\"body\":{\"id\":\"test.rally\",\"payload\":\"eyJhcnJpdmVkIjp0cnVlfQ==\",\"version\":1},\"seq\":22,\"type\":\"mission\",\"v\":7}",
+    "json" : "{\"body\":{\"id\":\"test.rally\",\"payload\":\"eyJhcnJpdmVkIjp0cnVlfQ==\",\"version\":1},\"seq\":27,\"type\":\"mission\",\"v\":7}",
     "type" : "mission"
   }
 ]

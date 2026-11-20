@@ -35,6 +35,137 @@ final class SquadCoreTests: XCTestCase {
         XCTAssertEqual(y.lastStatus("Watcher")?.holds, [])
     }
 
+    func testLeavingTakesAMemberOffTheSquadAndTellsEveryone() throws {
+        let y = Yard(mission: NoMission())
+        let ana = try XCTUnwrap(y.join("Ana"))
+        let ben = try XCTUnwrap(y.join("Ben"))
+        y.join("Watcher", role: .observer)
+        func told(_ who: String, _ kind: Notice.Kind, about member: MemberID, _ text: String) -> Bool {
+            y.has(who) { if case let .notice(n) = $0 { return n.kind == kind && n.member == member && n.text == text }; return false }
+        }
+
+        y.send("Ana", .position(MemberPosition(at: origin, accuracy: 3, time: y.now)))
+        y.send("Ana", .leave)
+        XCTAssertEqual(y.host.squad.members.map(\.id), [ben])
+        XCTAssertNil(y.host.positions[ana])
+        XCTAssertTrue(told("Ben", .left, about: ana, "Ana left the squad."))
+        XCTAssertTrue(told("Watcher", .left, about: ana, "Ana left the squad."))
+        XCTAssertEqual(y.lastStatus("Ben")?.squad.members.map(\.name), ["Ben"])
+        XCTAssertEqual(y.host.notices.map(\.kind), [.left], "kept for the leader's own screen")
+        XCTAssertEqual(y.host.credentials.first { $0.member == ana }?.revoked, true, "her credential is no use to anyone who finds it")
+
+        // Closing the app is not leaving: still on the squad, and nobody is told.
+        y.send("Ben", .bye)
+        XCTAssertEqual(y.host.squad.members.map(\.id), [ben])
+        XCTAssertEqual(y.host.notices.count, 1)
+
+        // The leader removing someone tells the squad too. A notice from a phone does nothing.
+        XCTAssertEqual(y.join("Ben"), ben)
+        y.send("Ben", .notice(Notice(kind: .left, text: "The leader left the squad.", time: y.now)))
+        XCTAssertEqual(y.host.notices.count, 1)
+        y.command { $0.removeMember(ben, now: $1) }
+        XCTAssertTrue(told("Watcher", .removed, about: ben, "Ben was removed from the squad."))
+        XCTAssertTrue(y.host.squad.members.isEmpty)
+    }
+
+    func testASquadThatSharesNotesIsAChatRoom() throws {
+        let y = Yard(mission: NoMission())
+        y.host.sharesNotes = true
+        y.join("Ana")
+        y.join("Ben")
+        func heard(_ who: String, _ text: String, from author: String) -> Bool {
+            y.has(who) { if case let .note(n) = $0 { return n.text == text && n.author == author }; return false }
+        }
+
+        // Ana's note reaches Ben, under the name the leader knows her by, and comes back to her only as a receipt.
+        let first = FieldNote(author: "Someone else", time: y.now, text: "At the gate")
+        y.send("Ana", .note(first))
+        XCTAssertTrue(heard("Ben", "At the gate", from: "Ana"))
+        XCTAssertFalse(heard("Ana", "At the gate", from: "Ana"))
+        XCTAssertTrue(y.has("Ana") { if case .receipt = $0 { return true }; return false })
+        // The same note again changes nothing.
+        y.send("Ana", .note(first))
+        XCTAssertEqual(y.host.notes.count, 1)
+
+        // The leader's own note reaches both.
+        y.command { core, now in core.postNote(FieldNote(author: "Lead", time: now, text: "Hold there")) }
+        XCTAssertTrue(heard("Ana", "Hold there", from: "Lead"))
+        XCTAssertTrue(heard("Ben", "Hold there", from: "Lead"))
+
+        // Someone who joins later reads up.
+        y.join("Cy")
+        XCTAssertTrue(heard("Cy", "At the gate", from: "Ana"))
+        XCTAssertTrue(heard("Cy", "Hold there", from: "Lead"))
+
+        // A squad that doesn't share notes keeps them with the leader.
+        let quiet = Yard(mission: NoMission())
+        quiet.join("Ana")
+        quiet.join("Ben")
+        quiet.send("Ana", .note(FieldNote(author: "Ana", time: quiet.now, text: "Just for the leader")))
+        XCTAssertEqual(quiet.host.notes.count, 1)
+        XCTAssertFalse(quiet.has("Ben") { if case .note = $0 { return true }; return false })
+    }
+
+    func testTheLeaderSetsHowOftenPositionsCome() throws {
+        let y = Yard(mission: NoMission())
+        y.join("Ana")
+        XCTAssertNil(y.lastStatus("Ana")?.reportEvery, "left to each device until the leader says")
+
+        y.command { $0.setReportEvery(3, now: $1) }
+        XCTAssertEqual(y.lastStatus("Ana")?.reportEvery, 3)
+        // Someone who joins afterwards is told as they join.
+        y.join("Ben")
+        XCTAssertEqual(y.lastStatus("Ben")?.reportEvery, 3)
+
+        // Kept within reason, and saying the same thing again sends nothing.
+        y.command { $0.setReportEvery(0, now: $1) }
+        XCTAssertEqual(y.host.reportEvery, 1)
+        y.command { $0.setReportEvery(100_000, now: $1) }
+        XCTAssertEqual(y.host.reportEvery, 600)
+        XCTAssertTrue(y.host.setReportEvery(600, now: y.now).isEmpty)
+        y.command { $0.setReportEvery(nil, now: $1) }
+        XCTAssertNil(y.lastStatus("Ana")?.reportEvery)
+    }
+
+    func testTheLeaderTakesAnOrderBack() throws {
+        let y = Yard(mission: NoMission())
+        let ana = try XCTUnwrap(y.join("Ana"))
+        y.join("Ben")
+        y.join("Watcher", role: .observer)
+        func cancelled(_ who: String, _ id: UUID) -> Bool { y.has(who) { $0 == .orderCancel(id) } }
+
+        y.command { $0.sendOrder(.moveTo, text: "To the oak", at: origin, to: [ana], now: $1) }
+        let order = try XCTUnwrap(y.host.orders.last)
+        y.command { $0.cancelOrder(order.id, now: $1) }
+        XCTAssertTrue(cancelled("Ana", order.id))
+        XCTAssertTrue(cancelled("Watcher", order.id))
+        XCTAssertFalse(cancelled("Ben", order.id), "it wasn't for him")
+        XCTAssertEqual(y.host.cancelled, [order.id])
+        XCTAssertEqual(y.host.orders.map(\.id), [order.id], "kept, for the record")
+
+        // An answer that was already on its way counts for nothing, and cancelling twice says nothing more.
+        y.send("Ana", .orderAck(OrderAck(order: order.id, response: .done)))
+        XCTAssertNil(y.host.acks[order.id]?[ana])
+        XCTAssertTrue(y.host.cancelOrder(order.id, now: y.now).isEmpty)
+        XCTAssertTrue(y.host.cancelOrder(UUID(), now: y.now).isEmpty)
+
+        // Ana was away for the next one being taken back: she hears when she is back, and isn't sent the order again.
+        y.command { $0.sendOrder(.holdPosition, text: "By the gate", to: [ana], now: $1) }
+        let second = try XCTUnwrap(y.host.orders.last)
+        y.host.peerClosed(y.peer("Ana"))
+        y.command { $0.cancelOrder(second.id, now: $1) }
+        y.got["Ana"] = []
+        XCTAssertEqual(y.join("Ana"), ana)
+        XCTAssertTrue(cancelled("Ana", second.id))
+        XCTAssertFalse(y.has("Ana") { if case .order = $0 { return true }; return false })
+
+        // A phone can't take an order back.
+        y.command { $0.sendOrder(.note, text: "Back by five", now: $1) }
+        let third = try XCTUnwrap(y.host.orders.last)
+        y.send("Ana", .orderCancel(third.id))
+        XCTAssertFalse(y.host.cancelled.contains(third.id))
+    }
+
     func testJoinCodesRejoinAndRemoval() throws {
         let y = Yard(mission: NoMission())
         // A link the transport hasn't vouched for can't join.

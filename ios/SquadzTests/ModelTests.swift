@@ -1,3 +1,4 @@
+import CoreLocation
 import CoreGeo
 import Network
 import SquadKit
@@ -46,6 +47,72 @@ final class ModelTests: XCTestCase {
         }
     }
 
+    func testFailedEnrollmentSaveKeepsLastRosterAndAllowsRetry() async throws {
+        let leader = model("Leader"), member = model("Member")
+        leader.startSquad(name: "Red", as: "Leader")
+        try await wait("leader listening") { leader.hostPort != nil }
+        leader.openJoining()
+        let invite = try XCTUnwrap(leader.invite)
+        try await wait("listener with invite key") { leader.hostIsListening }
+        let folder = made[0].2
+        let backup = folder.appendingPathExtension("backup")
+        let files = FileManager.default
+        try files.moveItem(at: folder, to: backup)
+        defer { try? files.removeItem(at: backup) }
+        try Data().write(to: folder) // A file in place of the parent directory makes writes fail.
+        point(to: leader, member)
+        member.join(invite, as: "Member")
+        try await wait("leader reporting the write failure") { leader.alert != nil }
+        XCTAssertEqual(leader.squad?.members.count, 1)
+        XCTAssertEqual(member.role, .none)
+        try files.removeItem(at: folder)
+        try files.moveItem(at: backup, to: folder)
+        let saved = folder.appendingPathComponent("leading.json")
+        XCTAssertEqual(try JSONDecoder().decode(LeaderSaved.self, from: Data(contentsOf: saved)).squad.members.count, 1)
+
+        try await wait("member receiving refusal") { !member.joining && member.alert != nil }
+        XCTAssertEqual(member.role, .none)
+        member.join(invite, as: "Member")
+        try await wait("durable enrollment") { member.role == .member && leader.squad?.members.count == 2 }
+        XCTAssertEqual(try JSONDecoder().decode(LeaderSaved.self, from: Data(contentsOf: saved)).squad, leader.squad)
+        leader.endSquad()
+    }
+
+    func testLocationStreamCanRestartAfterErrorAndCompletion() async throws {
+        var runs = 0
+        let fix = CLLocation(latitude: 10, longitude: 20)
+        let tracker = LocationTracker { receive in
+            runs += 1
+            receive(fix)
+            if runs == 1 { throw CancellationError() }
+        }
+        for expected in 1...3 {
+            tracker.start()
+            try await wait("location stream run") { runs == expected }
+            XCTAssertEqual(tracker.latest(now: .distantFuture)?.time, fix.timestamp)
+        }
+        tracker.stop()
+    }
+
+    func testStoppedLocationStreamCannotClearReplacement() async throws {
+        var pending: [CheckedContinuation<Void, Never>] = []
+        let tracker = LocationTracker { _ in
+            await withCheckedContinuation { pending.append($0) }
+        }
+        tracker.start()
+        try await wait("first stream") { pending.count == 1 }
+        tracker.stop()
+        tracker.start()
+        try await wait("replacement stream") { pending.count == 2 }
+        pending[0].resume()
+        await Task.yield()
+        tracker.start()
+        await Task.yield()
+        XCTAssertEqual(pending.count, 2)
+        tracker.stop()
+        for continuation in pending.dropFirst() { continuation.resume() }
+    }
+
     func testLeadJoinSeeEachOtherRemove() async throws {
         let ana = model("Ana"), ben = model("Ben")
         ana.startSquad(name: "Red", as: "Ana")
@@ -56,7 +123,7 @@ final class ModelTests: XCTestCase {
         // Ben reads the invite the way a scan delivers it: as text. Nothing joins yet.
         ana.openJoining()
         let shown = try XCTUnwrap(ana.invite).url(scheme: "squadz").absoluteString
-        try await Task.sleep(for: .milliseconds(300))   // the link takes the invite's key
+        try await wait("listener with invite key") { ana.hostIsListening }
         ben.offer(shown)
         let offered = try XCTUnwrap(ben.offered)
         XCTAssertEqual(offered.name, "Red")
@@ -100,13 +167,119 @@ final class ModelTests: XCTestCase {
         ana.endSquad()
     }
 
+    func testTheLeaderSendsAMemberSomewhereAndHearsBack() async throws {
+        let ana = model("Ana"), ben = model("Ben")
+        ana.startSquad(name: "Red", as: "Ana")
+        try await wait("the leader's link") { ana.hostPort != nil }
+        point(to: ana, ben)
+        ana.openJoining()
+        let shown = try XCTUnwrap(ana.invite).url(scheme: "squadz").absoluteString
+        try await wait("listener with invite key") { ana.hostIsListening }
+        ben.offer(shown)
+        ben.join(try XCTUnwrap(ben.offered), as: "Ben")
+        try await wait("Ben in") { ben.role == .member && ben.linkProblem == nil && ana.squad?.members.count == 2 }
+        let benID = try XCTUnwrap(ben.me)
+
+        // The leader's update rate reaches a member who is already in, and one who joins later gets it too.
+        XCTAssertEqual(ben.reportEvery, 10)
+        ana.setReportEvery(2)
+        try await wait("Ben follows the leader's rate") { ben.reportEvery == 2 }
+        XCTAssertEqual(ana.reportEvery, 2)
+        ben.setReportEvery(60)
+        XCTAssertEqual(ben.reportEvery, 2, "only the leader sets it")
+
+        // Field notes are a chat: each sees the other's, under the name the leader knows them by.
+        XCTAssertFalse(ben.sendNote("   "))
+        XCTAssertTrue(ben.sendNote("At the gate"))
+        try await wait("the leader has Ben's note") { ana.notes.count == 1 }
+        XCTAssertEqual(ana.notes.first?.author, "Ben")
+        XCTAssertEqual(ana.unreadNotes, 1)
+        XCTAssertEqual(ben.unreadNotes, 0, "his own")
+        XCTAssertTrue(ana.sendNote("Hold there"))
+        try await wait("Ben has the leader's note") { ben.notes.count == 2 }
+        XCTAssertEqual(ben.notes.map(\.text), ["At the gate", "Hold there"])
+        XCTAssertEqual(ben.notes.map(ben.isMine), [true, false])
+        XCTAssertEqual(ana.notes.map(ana.isMine), [false, true])
+        XCTAssertEqual(ben.unreadNotes, 1)
+        ben.markNotesRead()
+        XCTAssertEqual(ben.unreadNotes, 0)
+
+        // Not sent: a move-to with no place, a note with no words, and anything from a member.
+        XCTAssertFalse(ana.sendOrder(.moveTo, text: "The oak"))
+        XCTAssertFalse(ana.sendOrder(.note, text: "  "))
+        XCTAssertFalse(ben.sendOrder(.holdPosition, text: ""))
+        XCTAssertTrue(ana.orders.isEmpty)
+
+        let oak = GeoPoint(latitude: 42.361, longitude: -71.061)
+        XCTAssertTrue(ana.sendOrder(.moveTo, text: "The oak", at: oak, to: [benID]))
+        try await wait("Ben has the order") { ben.orders.count == 1 }
+        let order = try XCTUnwrap(ben.orders.first)
+        XCTAssertEqual(order.title, "Move to")
+        XCTAssertEqual(order.at, oak)
+        XCTAssertEqual(ben.openOrders.map(\.id), [order.id])
+        XCTAssertEqual(ana.recipients(of: order).map(\.name), ["Ben"], "the leader isn't asked to answer its own order")
+        XCTAssertEqual(OrdersPanel.answers(to: order, from: ana.recipients(of: order), given: ana.answers[order.id] ?? [:]), "Ben: no answer yet")
+        XCTAssertFalse(ana.isSettled(order))
+
+        // New and for him alone: put in front of him, and red on both. Seen keeps it open, and turns it yellow.
+        XCTAssertEqual(ben.newOrder?.id, order.id)
+        XCTAssertEqual(ben.tone(of: order), .personal)
+        XCTAssertEqual(ana.tone(of: order), .personal)
+        ben.answer(order, .seen)
+        try await wait("the leader sees Seen") { ana.answers[order.id]?[benID] == .seen }
+        XCTAssertNil(ben.newOrder)
+        XCTAssertEqual(ben.tone(of: order), .seen)
+        XCTAssertEqual(ana.tone(of: order), .seen)
+        XCTAssertEqual(ben.openOrders.count, 1)
+        XCTAssertEqual(ana.openOrders.count, 1)
+        ben.answer(order, .done)
+        try await wait("the leader sees Done") { ana.answers[order.id]?[benID] == .done }
+        XCTAssertTrue(ben.openOrders.isEmpty)
+        XCTAssertTrue(ana.openOrders.isEmpty)
+        XCTAssertEqual(OrdersPanel.answers(to: order, from: ana.recipients(of: order), given: ana.answers[order.id] ?? [:]), "Ben: Done")
+
+        // To the whole squad, newest first on both.
+        XCTAssertTrue(ana.sendOrder(.note, text: "Back by five"))
+        try await wait("Ben has the note") { ben.orders.count == 2 }
+        XCTAssertEqual(ben.newOrder?.text, "Back by five")
+        XCTAssertEqual(ben.tone(of: try XCTUnwrap(ben.newOrder)), .team)
+        XCTAssertEqual(ben.orders.first?.text, "Back by five")
+        XCTAssertEqual(ana.orders.first?.text, "Back by five")
+        // A new move for the same people replaces the old one; an order can also be taken back.
+        let elm = GeoPoint(latitude: 42.362, longitude: -71.062)
+        XCTAssertTrue(ana.sendOrder(.moveTo, text: "The pond", at: oak, to: [benID]))
+        try await wait("Ben has the pond") { ben.queue.contains { $0.text == "The pond" } }
+        XCTAssertTrue(ana.sendOrder(.moveTo, text: "The elm", at: elm, to: [benID]))
+        try await wait("the pond is replaced") { ben.queue.map(\.text) == ["Back by five", "The elm"] }
+        XCTAssertEqual(ana.openOrders.compactMap(\.at), [elm], "one flag, at the new place")
+        ana.cancelOrder(try XCTUnwrap(ana.orders.first { $0.text == "The elm" }))
+        try await wait("the elm is taken back") { ben.queue.map(\.text) == ["Back by five"] }
+        XCTAssertEqual(ben.cancelledOrders.count, 2)
+        ben.answer(try XCTUnwrap(ben.orders.first { $0.text == "The elm" }), .done)
+        XCTAssertNil(ben.myAnswers.first { $0.value == .done && $0.key != order.id })
+
+        // Two more wait in the order they came: the oldest is the one to do next.
+        XCTAssertTrue(ana.sendOrder(.holdPosition, text: "By the gate"))
+        try await wait("Ben has the gate") { ben.queue.count == 2 }
+        XCTAssertEqual(ben.queue.map(\.text), ["Back by five", "By the gate"])
+        ben.answer(try XCTUnwrap(ben.queue.first), .done)
+        XCTAssertEqual(ben.queue.map(\.text), ["By the gate"])
+        let gate = try XCTUnwrap(ben.queue.first)
+        ben.answer(gate, .cannot)
+        XCTAssertEqual(ben.tone(of: gate), .cannot)
+        XCTAssertTrue(ben.queue.isEmpty)
+        XCTAssertEqual(ben.orders.count, 5, "answered and cancelled orders stay in the list")
+        try await wait("the leader sees Can't") { ana.openOrders.isEmpty }
+        ana.endSquad()
+    }
+
     func testALeaderPicksUpItsSquadAfterARestart() async throws {
         let ana = model("Ana"), ben = model("Ben")
         ana.startSquad(name: "Red", as: "Ana")
         try await wait("the leader's link") { ana.hostPort != nil }
         point(to: ana, ben)
         ana.openJoining()
-        try await Task.sleep(for: .milliseconds(300))
+        try await wait("listener with invite key") { ana.hostIsListening }
         ben.offer(try XCTUnwrap(ana.invite).url(scheme: "squadz").absoluteString)
         ben.join(try XCTUnwrap(ben.offered), as: "Ben")
         try await wait("Ben in") { ben.linkProblem == nil && ben.squad?.members.count == 2 }
@@ -143,5 +316,38 @@ final class ModelTests: XCTestCase {
         ben.offer(old.url(scheme: "squadz").absoluteString)
         XCTAssertNil(ben.offered)
         XCTAssertEqual(ben.alert, "This invite has expired. Ask for a new one.")
+    }
+
+    func testAMembersDetailLine() {
+        XCTAssertEqual([0, 44, 46, 90, 181, 270, 337, 338, -45].map(MemberList.compass), ["N", "NE", "NE", "E", "S", "W", "NW", "N", "NW"])
+
+        let here = GeoPoint(latitude: 44.05, longitude: -121.31)
+        let ana = Member(id: MemberID(), name: "Ana", device: UUID(), role: .member)
+        let position = MemberPosition(at: Geo.destination(here, bearing: 90, distance: 500), accuracy: 5, time: .now)
+        let joined = Date(timeIntervalSince1970: 1_800_000_000)
+
+        // On the leader's device: the link first, then where, then when she joined.
+        let seen = MemberList.details(Located(member: ana, position: position, isMe: false, isLeader: false, link: .relay, joined: joined), from: here)
+        XCTAssertEqual(seen.count, 5, "\(seen)")
+        XCTAssertEqual(seen.first, "Connected through the relay")
+        XCTAssertTrue(seen[1].hasSuffix(" E of you"), seen[1])
+        XCTAssertTrue(seen[2].hasPrefix("±"), seen[2])
+        XCTAssertEqual(seen[3], String(format: "%.5f, %.5f", position.at.latitude, position.at.longitude))
+        XCTAssertTrue(seen[4].hasPrefix("joined "), seen[4])
+
+        // On a member's phone the link and the joining time aren't known, and nobody is a distance from themselves.
+        XCTAssertEqual(MemberList.details(Located(member: ana, position: position, isMe: true, isLeader: false), from: position.at).count, 2)
+        XCTAssertEqual(MemberList.details(Located(member: ana, position: nil, isMe: false, isLeader: false, link: .away), from: here), ["Not connected"])
+        XCTAssertEqual(MemberList.details(Located(member: ana, position: nil, isMe: false, isLeader: false), from: nil), [])
+
+        // The leader chooses which of these the list shows.
+        let all = Located(member: ana, position: position, isMe: false, isLeader: false, link: .direct, joined: joined)
+        XCTAssertEqual(MemberList.details(all, from: here, showing: [.link]), ["Connected"])
+        XCTAssertEqual(MemberList.details(all, from: here, showing: [.coordinates, .link]).count, 2)
+        XCTAssertEqual(MemberList.details(all, from: here, showing: []), [])
+        XCTAssertEqual(MemberDetail.chosen(MemberDetail.everything), Set(MemberDetail.allCases))
+        XCTAssertEqual(MemberDetail.stored([.joined, .link]), "link,joined")
+        XCTAssertEqual(MemberDetail.chosen("link,nonsense,,joined"), [.link, .joined])
+        XCTAssertEqual(MemberDetail.chosen(""), [])
     }
 }

@@ -52,6 +52,12 @@ public struct SquadCore<M: Mission> {
     /// Whether members see each other's positions, as observers always do. The leader's choice:
     /// on for a squad that is out together, off where only the leader should know where people are.
     public var sharesPositions: Bool
+    /// How often the leader wants positions, in seconds; nil leaves it to each device. Sent to
+    /// everyone in `status`, so a device learns it as it joins and again if it changes.
+    public private(set) var reportEvery: Int?
+    /// Whether members see each other's notes, like a chat room, as observers always do. Off,
+    /// notes go to the leader only.
+    public var sharesNotes: Bool
     /// The last thing that went wrong, for the leader's screen.
     public private(set) var lastProblem: String?
     /// Notes from members, oldest first (passed on to observers as they arrive).
@@ -59,8 +65,14 @@ public struct SquadCore<M: Mission> {
     /// Orders sent this session, oldest first, and each recipient's latest answer.
     public private(set) var orders: [Order] = []
     public private(set) var acks: [UUID: [MemberID: OrderAck.Response]] = [:]
+    /// Orders the leader took back. They stay in `orders`, for the record.
+    public private(set) var cancelled: Set<UUID> = []
+    /// What the squad was told, oldest first: members leaving or being removed.
+    public private(set) var notices: [Notice] = []
+    static var maxNoticesKept: Int { 50 }
     static var maxOrdersKept: Int { 100 }
     static var maxNotesKept: Int { 100 }
+    static var notesOnJoin: Int { 50 }
 
     /// Check fire in force, from any member or this device. Only the leader lifts it.
     public private(set) var activeCheckFire: CheckFire?
@@ -69,8 +81,10 @@ public struct SquadCore<M: Mission> {
     /// A new squad, or one read back: `keys` from the Keychain, the rest from where the app
     /// saved it.
     public init(squad: Squad, mission: M, keys: LeaderKeys = LeaderKeys(), credentials: [CredentialRecord] = [],
-                epoch: Int = 0, keyChanges: [LeaderKeyChange] = [], revision: Int = 0, sharesPositions: Bool = false) {
+                epoch: Int = 0, keyChanges: [LeaderKeyChange] = [], revision: Int = 0, sharesPositions: Bool = false,
+                sharesNotes: Bool = false) {
         self.sharesPositions = sharesPositions
+        self.sharesNotes = sharesNotes
         self.squad = squad
         self.mission = mission
         self.keys = keys
@@ -174,19 +188,23 @@ public struct SquadCore<M: Mission> {
         case .bye:
             peers[peer] = nil
             return []
+        case .leave:
+            let name = squad.members.first { $0.id == member }?.name ?? "A member"
+            return drop(member, notice: Notice(kind: .left, text: "\(name) left the squad.", member: member, time: now), now: now)
         case var .position(p):
             p.member = member
             positions[member] = p
             return report(p, except: peer)
         case var .note(n):
             n.author = squad.members.first { $0.id == member }?.name ?? n.author
+            guard !notes.contains(where: { $0.id == n.id }) else { return [] }   // sent twice
             notes.append(n)
             if notes.count > Self.maxNotesKept { notes.removeFirst(notes.count - Self.maxNotesKept) }
-            let toObservers = view.observerPeers.map { Outgoing(to: $0, .note(n)) }
-            return [Outgoing(to: peer, .receipt(Receipt(id: n.id, status: .stored, detail: "Sent to \(squad.name)'s leader.")))] + toObservers
+            return [Outgoing(to: peer, .receipt(Receipt(id: n.id, status: .stored, detail: "Sent to \(squad.name)'s leader.")))]
+                + passOn(n, except: peer)
         case let .orderAck(a):
             // Only from someone the order was for.
-            guard let o = orders.first(where: { $0.id == a.order }), o.isFor(member) else { return [] }
+            guard let o = orders.first(where: { $0.id == a.order }), o.isFor(member), !cancelled.contains(o.id) else { return [] }
             acks[a.order, default: [:]][member] = a.response
             return []
         case let .checkFire(cf):
@@ -196,8 +214,8 @@ public struct SquadCore<M: Mission> {
             guard m.id == M.id, m.version == M.version else { return [] }
             let core = view
             return finish(mission.handle(m.payload, from: member, peer: peer, core: core, now: now), now: now)
-        case .hello, .link, .fileOffer, .fileChunk, .fileDone, .enrolled, .leaderKey, .welcome, .observing, .refused,
-             .status, .order, .receipt, .positions:
+        case .hello, .link, .seal, .fileOffer, .fileChunk, .fileDone, .enrolled, .leaderKey, .welcome, .observing, .refused,
+             .status, .order, .orderCancel, .receipt, .positions, .notice:
             return []   // the leader's own messages from a phone, or files (a squad doesn't take them): ignored
         }
     }
@@ -270,10 +288,14 @@ public struct SquadCore<M: Mission> {
         peers = peers.filter { $0.value != id }   // a rejoin replaces the old link
         peers[peer] = id
         // Orders for this member that it hasn't finished, so a rejoin (or a late joiner) has them.
-        let open = orders.filter { $0.isFor(id) && acks[$0.id]?[id] != .done && acks[$0.id]?[id] != .cannot }.suffix(10)
+        let open = orders.filter { $0.isFor(id) && !cancelled.contains($0.id) && acks[$0.id]?[id] != .done && acks[$0.id]?[id] != .cannot }.suffix(10)
         let known = sharesPositions ? positions.values.filter { $0.member != id }.sorted { $0.time < $1.time } : []
+        // What has been said, so someone who joins late or comes back can read up.
+        let said = sharesNotes ? notes.suffix(Self.notesOnJoin).map { Outgoing(to: peer, .note($0)) } : []
+        // And the ones taken back, in case it was away when they were.
+        let taken = orders.filter { $0.isFor(id) && cancelled.contains($0.id) }.suffix(10)
         return changes + [Outgoing(to: peer, .welcome(Welcome(member: id, squad: squad)))]
-            + open.map { Outgoing(to: peer, .order($0)) } + changed(now: now)
+            + open.map { Outgoing(to: peer, .order($0)) } + taken.map { Outgoing(to: peer, .orderCancel($0.id)) } + said + changed(now: now)
             + (known.isEmpty ? [] : [Outgoing(to: peer, .positions(PositionsReport(squad: squadID, positions: known)))])
     }
 
@@ -295,11 +317,20 @@ public struct SquadCore<M: Mission> {
     /// Takes a member off the roster and revokes their credential: their link closes and their
     /// device can't connect again without a new invite.
     public mutating func removeMember(_ member: MemberID, now: Date) -> [Outgoing] {
+        guard let name = squad.members.first(where: { $0.id == member })?.name else { return [] }
+        return drop(member, notice: Notice(kind: .removed, text: "\(name) was removed from the squad.", member: member, time: now), now: now)
+    }
+
+    /// Off the roster, credential revoked, and everyone who is left told why.
+    private mutating func drop(_ member: MemberID, notice: Notice, now: Date) -> [Outgoing] {
         let ids = Set(credentials.filter { $0.member == member }.map(\.id))
         let closing = revoke(ids)
         squad.members.removeAll { $0.id == member }
         positions[member] = nil
-        return closing + changed(now: now)
+        notices.append(notice)
+        if notices.count > Self.maxNoticesKept { notices.removeFirst(notices.count - Self.maxNoticesKept) }
+        let told = (Array(peers.keys) + Array(observers)).sorted { $0.raw < $1.raw }.map { Outgoing(to: $0, .notice(notice)) }
+        return closing + told + changed(now: now)
     }
 
     /// Revokes one credential: an observer's, or a member's (which also takes them off the roster).
@@ -381,6 +412,38 @@ public struct SquadCore<M: Mission> {
         return (members + Array(observers)).sorted { $0.raw < $1.raw }.map { Outgoing(to: $0, .order(order)) }
     }
 
+    /// Sets how often every device should send its position, kept within
+    /// `SquadStatus.reportEveryRange`, and tells everyone. Nil leaves it to each device.
+    public mutating func setReportEvery(_ seconds: Int?, now: Date) -> [Outgoing] {
+        let wanted = seconds.map { min(max($0, SquadStatus.reportEveryRange.lowerBound), SquadStatus.reportEveryRange.upperBound) }
+        guard wanted != reportEvery else { return [] }
+        reportEvery = wanted
+        return changed(now: now)
+    }
+
+    /// A note from the leader's own device, to everyone who gets notes.
+    public mutating func postNote(_ note: FieldNote) -> [Outgoing] {
+        notes.append(note)
+        if notes.count > Self.maxNotesKept { notes.removeFirst(notes.count - Self.maxNotesKept) }
+        return passOn(note, except: nil)
+    }
+
+    /// A note to observers, and to the other members when the squad shares notes.
+    private func passOn(_ note: FieldNote, except sender: PeerID?) -> [Outgoing] {
+        let members = sharesNotes ? peers.keys.filter { $0 != sender } : []
+        return (members + Array(observers)).sorted { $0.raw < $1.raw }.map { Outgoing(to: $0, .note(note)) }
+    }
+
+    /// Takes an order back: everyone it was for, and observers, are told it no longer needs
+    /// doing. Answers that arrive after this are ignored. A member who is away hears when they
+    /// are back.
+    public mutating func cancelOrder(_ id: UUID, now: Date) -> [Outgoing] {
+        guard let order = orders.first(where: { $0.id == id }), !cancelled.contains(id) else { return [] }
+        cancelled.insert(id)
+        let members = peers.filter { order.isFor($0.value) }.map(\.key)
+        return (members + Array(observers)).sorted { $0.raw < $1.raw }.map { Outgoing(to: $0, .orderCancel(id)) }
+    }
+
     /// Who an order is for, by member.
     public func recipients(of order: Order) -> [Member] {
         squad.members.filter { order.isFor($0.id) }
@@ -448,6 +511,6 @@ public struct SquadCore<M: Mission> {
         let section = mission.status(core: core, now: now).map { MissionStatus(id: M.id, version: M.version, payload: $0) }
         return SquadStatus(revision: revision, squad: squad,
                            holds: holds(now: now).sorted { ($0.source, $0.kind, $0.text) < ($1.source, $1.kind, $1.text) },
-                           missions: section.map { [$0] } ?? [])
+                           missions: section.map { [$0] } ?? [], reportEvery: reportEvery)
     }
 }

@@ -23,10 +23,15 @@ public struct SquadMessage: Equatable, Sendable {
         /// The first frame on a link, for the transport: which key the sender holds. The core
         /// never sees it.
         case link(LinkProof)
+        /// The first frame each end sends on a link something else carries, like a relay: the
+        /// nonces the link's keys are made from. The core never sees it.
+        case seal(LinkSeal)
 
         // Member's phone → leader
         case hello(Hello)
         case bye
+        /// Leaving for good: the leader takes the member off the squad and tells everyone.
+        case leave
         case position(MemberPosition)
         case orderAck(OrderAck)
         /// Anyone → leader.
@@ -49,10 +54,14 @@ public struct SquadMessage: Equatable, Sendable {
         case refused(String)
         case status(SquadStatus)
         case order(Order)
+        /// The leader took an order back: it no longer needs doing or answering.
+        case orderCancel(UUID)
         /// What the receiver did with a note or a file.
         case receipt(Receipt)
         /// Leader → observers.
         case positions(PositionsReport)
+        /// Leader → everyone: something to tell people, like a member leaving.
+        case notice(Notice)
 
         /// Either way: a mission's own message.
         case mission(MissionMessage)
@@ -62,16 +71,20 @@ public struct SquadMessage: Equatable, Sendable {
 extension SquadMessage: Codable {
     private enum Keys: String, CodingKey { case v, seq, type, body }
     private struct FileRef: Codable { var file: UUID }
+    private struct OrderRef: Codable { var order: UUID }
     private struct Reason: Codable { var reason: String }
 
     /// The `type` on the wire.
     public var type: String {
         switch body {
         case .link: return "link"
+        case .seal: return "seal"
         case .enrolled: return "enrolled"
         case .leaderKey: return "leaderKey"
         case .hello: return "hello"
         case .bye: return "bye"
+        case .leave: return "leave"
+        case .notice: return "notice"
         case .position: return "position"
         case .orderAck: return "orderAck"
         case .checkFire: return "checkFire"
@@ -84,6 +97,7 @@ extension SquadMessage: Codable {
         case .refused: return "refused"
         case .status: return "status"
         case .order: return "order"
+        case .orderCancel: return "orderCancel"
         case .receipt: return "receipt"
         case .positions: return "positions"
         case .mission: return "mission"
@@ -96,8 +110,10 @@ extension SquadMessage: Codable {
         try c.encode(seq, forKey: .seq)
         try c.encode(type, forKey: .type)
         switch body {
-        case .bye: break
+        case .bye, .leave: break
+        case let .notice(x): try c.encode(x, forKey: .body)
         case let .link(x): try c.encode(x, forKey: .body)
+        case let .seal(x): try c.encode(x, forKey: .body)
         case let .enrolled(x): try c.encode(x, forKey: .body)
         case let .leaderKey(x): try c.encode(x, forKey: .body)
         case let .hello(x): try c.encode(x, forKey: .body)
@@ -113,6 +129,7 @@ extension SquadMessage: Codable {
         case let .refused(x): try c.encode(Reason(reason: x), forKey: .body)
         case let .status(x): try c.encode(x, forKey: .body)
         case let .order(x): try c.encode(x, forKey: .body)
+        case let .orderCancel(x): try c.encode(OrderRef(order: x), forKey: .body)
         case let .receipt(x): try c.encode(x, forKey: .body)
         case let .positions(x): try c.encode(x, forKey: .body)
         case let .mission(x): try c.encode(x, forKey: .body)
@@ -127,10 +144,13 @@ extension SquadMessage: Codable {
         func value<T: Decodable>(_: T.Type = T.self) throws -> T { try c.decode(T.self, forKey: .body) }
         switch type {
         case "link": body = .link(try value())
+        case "seal": body = .seal(try value())
         case "enrolled": body = .enrolled(try value())
         case "leaderKey": body = .leaderKey(try value())
         case "hello": body = .hello(try value())
         case "bye": body = .bye
+        case "leave": body = .leave
+        case "notice": body = .notice(try value())
         case "position": body = .position(try value())
         case "orderAck": body = .orderAck(try value())
         case "checkFire": body = .checkFire(try value())
@@ -143,6 +163,7 @@ extension SquadMessage: Codable {
         case "refused": body = .refused(try value(Reason.self).reason)
         case "status": body = .status(try value())
         case "order": body = .order(try value())
+        case "orderCancel": body = .orderCancel(try value(OrderRef.self).order)
         case "receipt": body = .receipt(try value())
         case "positions": body = .positions(try value())
         case "mission": body = .mission(try value())

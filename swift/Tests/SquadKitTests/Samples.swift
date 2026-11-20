@@ -31,12 +31,16 @@ enum Samples {
         let sealed = SealedCredential(id: bytes(1, 16), epoch: 0, issued: t, key: bytes(4, 65), sealed: bytes(5, 60))
         let all: [SquadMessage.Body] = [
             .link(LinkProof(id: "m:" + bytes(1, 16).hex, proof: bytes(2, 32))),
+            .seal(LinkSeal(id: "m:" + bytes(1, 16).hex, nonce: bytes(10, 16))),
+            .seal(LinkSeal(nonce: bytes(11, 16))),
             .hello(Hello(name: "Ana", device: uuid(3), nonce: bytes(3, 16), key: bytes(6, 65))),
             .hello(Hello(name: "Watcher", device: uuid(4), role: .observer, nonce: bytes(3, 16))),
             .enrolled(Enrolled(squad: squad.id, name: "Red", member: ana.id, role: .member, credential: sealed,
                                leader: bytes(7, 65), signature: bytes(8, 64))),
             .leaderKey(LeaderKeyChange(squad: squad.id, key: bytes(9, 65), time: t, signature: bytes(8, 64))),
             .bye,
+            .leave,
+            .notice(Notice(id: uuid(12), kind: .left, text: "Ana left the squad.", member: ana.id, time: t)),
             .position(MemberPosition(at: origin, accuracy: 3, heading: 12, time: t)),
             .orderAck(OrderAck(order: uuid(5), response: .done)),
             .checkFire(CheckFire(id: uuid(6), by: "Ana")),
@@ -51,16 +55,18 @@ enum Samples {
             .status(SquadStatus(revision: 4, squad: squad,
                                 holds: [.checkFire(by: "Ana"),
                                         Hold(source: "test.rally", kind: "notAtRally", member: ana.id, text: "Ana isn't at the rally point.")],
-                                missions: [MissionStatus(id: "test.rally", version: 1, payload: Data(#"{"rally":null}"#.utf8))])),
+                                missions: [MissionStatus(id: "test.rally", version: 1, payload: Data(#"{"rally":null}"#.utf8))],
+                                reportEvery: 5)),
             .order(Order(id: uuid(10), kind: .moveTo, text: "Left flank, by the shed", at: origin, to: [ana.id], time: t)),
             .order(Order(id: uuid(11), kind: Order.Kind(rawValue: "test.rally.regroup"), text: "Regroup", time: t)),
+            .orderCancel(uuid(10)),
             .receipt(Receipt(id: uuid(7), status: .stored, detail: "ok")),
             .positions(PositionsReport(squad: squad.id, positions: [MemberPosition(member: ana.id, at: origin, accuracy: 2, time: t)])),
             .mission(MissionMessage(id: "test.rally", version: 1, payload: Data(#"{"arrived":true}"#.utf8))),
         ]
         for body in all {
             switch body {   // exhaustive on purpose
-            case .link, .enrolled, .leaderKey, .hello, .bye, .position, .orderAck, .checkFire, .note, .fileOffer, .fileChunk, .fileDone,
+            case .link, .seal, .enrolled, .leaderKey, .hello, .bye, .leave, .notice, .orderCancel, .position, .orderAck, .checkFire, .note, .fileOffer, .fileChunk, .fileDone,
                  .welcome, .observing, .refused, .status, .order, .receipt, .positions, .mission: break
             }
         }

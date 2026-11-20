@@ -7,14 +7,17 @@ import SquadKit
 // SquadKit through a relay (docs/RELAY.md): for when a squad's devices aren't on one network.
 // Each device holds a WebSocket to the relay. The leader's device opens the squad's room; a
 // member's device opens a link into it; the relay passes the same frames the local link carries.
-// The leader's device still asks every link to prove its key, exactly as on the local network:
-// the relay's say-so lets a device knock, never in.
+// The leader's device still asks every link for its key, as on the local network: the relay's
+// say-so lets a device knock, never in. And every link is sealed between the two devices
+// (docs/WIRE.md, "Sealed links"), so the relay carries frames it can't read or change.
 
 enum RelayLink {
     static let away = "The leader's device isn't connected to the relay."
     static let ticketRefused = "The relay didn't accept this device."
     static let slow = "The relay is turning this network away for a few minutes."
     static let wrongCertificate = "The relay didn't show the certificate this squad expects."
+    /// How a failure to get to the relay at all starts: no network, or not allowed onto it yet.
+    static let unreachable = "Couldn't reach the relay"
 }
 
 /// One WebSocket to a relay. Text messages are the relay's own (JSON); binary ones are a squad's.
@@ -129,7 +132,7 @@ final class RelaySocket {
 
     static func describe(_ error: NWError) -> String {
         if case .tls = error { return RelayLink.wrongCertificate }
-        return "Couldn't reach the relay (\(error))."
+        return "\(RelayLink.unreachable) (\(error))."
     }
 }
 

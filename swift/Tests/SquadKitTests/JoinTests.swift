@@ -308,6 +308,16 @@ final class JoinTests: XCTestCase {
         var hello: String
         var enrolled: String
         var leaderKeyChange: String
+        var sealed: Sealed
+        /// A sealed link (docs/WIRE.md §9): the member's link key, `binding` as the carrier's
+        /// value, and the first two frames each way.
+        struct Sealed: Codable, Equatable {
+            var deviceNonce: String
+            var leaderNonce: String
+            var plain: [String]
+            var fromDevice: [String]
+            var fromLeader: [String]
+        }
         struct Link: Codable, Equatable { var identity: String; var key: String }
     }
 
@@ -337,6 +347,12 @@ final class JoinTests: XCTestCase {
             let enrolled = Enrolled(squad: squad, name: "Red Squad", member: member, role: .member, credential: sealed,
                                     leader: keys.publicKey, signature: signature)
             let next = try LeaderKeys(root: keys.root, identity: bytes(90, 32))
+            let deviceNonce = bytes(170, 16), leaderNonce = bytes(190, 16), plain = ["first frame", "second frame"]
+            var device = try XCTUnwrap(SealedLink(key: memberLink, side: .device, carrier: binding, device: deviceNonce, leader: leaderNonce))
+            var leader = try XCTUnwrap(SealedLink(key: memberLink, side: .leader, carrier: binding, device: deviceNonce, leader: leaderNonce))
+            let sealedLink = Vectors.Sealed(deviceNonce: deviceNonce.hex, leaderNonce: leaderNonce.hex, plain: plain,
+                                        fromDevice: try plain.map { try device.seal(Data($0.utf8)).hex },
+                                        fromLeader: try plain.map { try leader.seal(Data($0.utf8)).hex })
             return Vectors(squad: squad.raw.uuidString, tag: squad.tag, root: keys.root.hex, credentialID: id.hex, epoch: 3,
                            memberSecret: secret.hex, memberLink: link(memberLink),
                            inviteSecret: enrol.hex, inviteLink: link(invite.linkKey),
@@ -346,7 +362,8 @@ final class JoinTests: XCTestCase {
                            fingerprint: keys.fingerprint.hex, inviteURL: invite.url(scheme: "squadz").absoluteString,
                            memberOneTimePrivate: memberKey.rawRepresentation.hex,
                            hello: try json(request.hello), enrolled: try json(enrolled),
-                           leaderKeyChange: try json(LeaderKeyChange(squad: squad, to: next.publicKey, time: t, signedBy: keys)))
+                           leaderKeyChange: try json(LeaderKeyChange(squad: squad, to: next.publicKey, time: t, signedBy: keys)),
+                           sealed: sealedLink)
         }()
         if ProcessInfo.processInfo.environment["UPDATE_VECTORS"] == "1" {
             let e = JSONEncoder()
