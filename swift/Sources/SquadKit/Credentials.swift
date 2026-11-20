@@ -199,6 +199,8 @@ public struct MemberCredential: Codable, Equatable, Sendable {
     public var issued: Date
     /// The leader's identity key (X9.63), as pinned when joining.
     public var leader: Data
+    /// This device's pass for the squad's relay, if it has one. From the relay, not the leader.
+    public var relay: RelayTicket? = nil
 
     public var linkKey: LinkKey { .member(credential: id, secret: secret, squad: squad) }
 

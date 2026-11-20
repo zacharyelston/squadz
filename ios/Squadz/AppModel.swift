@@ -27,12 +27,15 @@ struct LeaderSaved: Codable, Equatable {
     var epoch: Int
     var keyChanges: [LeaderKeyChange]
     var revision: Int
+    /// The relay this squad was started with, if any.
+    var relay: RelayAddress?
 }
 
 /// The whole app: this phone either leads one squad, is a member of one, or is in none.
 ///
 /// A leader's phone *is* the squad: it holds the roster and everyone's positions and the others
-/// connect to it directly, over Wi-Fi or a mesh. There is no server.
+/// connect to it directly, over Wi-Fi or a mesh. There is no server. A squad started with a relay
+/// can also be reached over the internet: the relay passes the same links along and decides nothing.
 @MainActor
 @Observable
 final class AppModel {
@@ -51,6 +54,8 @@ final class AppModel {
     var alert: String?
     /// The leader's open invite, to show as a QR code.
     private(set) var invite: SquadInvite?
+    /// How the relay is doing, for a line under the title. Nil for a squad without one.
+    private(set) var relayNote: String?
 
     let device: UUID
     private let defaults: UserDefaults
@@ -62,10 +67,13 @@ final class AppModel {
 
     private var core: SquadCore<NoMission>?
     private var host: SquadLinkHost?
+    private var relayHost: RelayLinkHost?
     private var client: SquadLinkClient?
     private var enroller: SquadEnroller?
     /// For tests: where a member connects instead of looking the leader up with Bonjour.
     var fixedEndpoint: (() -> NWEndpoint?)?
+    /// Seconds a member looks for the squad on this network before going through its relay.
+    var relayAfter: TimeInterval = 3
 
     /// Seconds between position reports.
     static let reportEvery: TimeInterval = 10
@@ -104,7 +112,7 @@ final class AppModel {
         if let saved = loadLeader(), let keys = try? keychain.leaderKeys(for: saved.squad.id) {
             lead(SquadCore(squad: saved.squad, mission: NoMission(), keys: keys, credentials: saved.credentials,
                            epoch: saved.epoch, keyChanges: saved.keyChanges, revision: saved.revision, sharesPositions: true),
-                 me: saved.me)
+                 me: saved.me, relay: saved.relay)
         } else if let id = defaults.string(forKey: "memberSquad").flatMap(UUID.init(uuidString:)),
                   let credential = try? keychain.credential(for: SquadID(id)) {
             connect(credential)
@@ -114,13 +122,26 @@ final class AppModel {
     /// The app came back to the front: links that dropped while it was away come back now.
     func foreground() {
         host?.restart()
+        relayHost?.retryNow()
         client?.retryNow()
     }
 
     // MARK: Leading
 
+    /// The relay new squads are started with, as typed on the home screen. Nil for none.
+    /// Throws nothing: a relay that doesn't read as an address is reported by `startSquad`.
+    private var relaySetting: (text: String, address: RelayAddress?) {
+        let text = (defaults.string(forKey: "relayURL") ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return (text, RelayAddress(text: text, pin: defaults.string(forKey: "relayPin")))
+    }
+
     func startSquad(name squadName: String, as myName: String) {
         guard role == .none else { return }
+        let relay = relaySetting
+        guard relay.text.isEmpty || relay.address != nil else {
+            alert = "The relay's address or certificate fingerprint doesn't look right. Fix it or clear it, then start the squad."
+            return
+        }
         let mine = Member(name: myName, device: device)
         let core = SquadCore(squad: Squad(name: squadName, members: [mine]), mission: NoMission(), sharesPositions: true)
         do {
@@ -129,10 +150,10 @@ final class AppModel {
             alert = "Couldn't save this squad's keys, so it wasn't started."
             return
         }
-        lead(core, me: mine.id)
+        lead(core, me: mine.id, relay: relay.address)
     }
 
-    private func lead(_ core: SquadCore<NoMission>, me: MemberID) {
+    private func lead(_ core: SquadCore<NoMission>, me: MemberID, relay: RelayAddress?) {
         do {
             let host = try SquadLinkHost(name: core.squad.name, keys: core.linkKeys(now: .now), service: service,
                                          txt: [SquadService.Key.tag: core.squadID.tag], advertise: advertise)
@@ -153,12 +174,48 @@ final class AppModel {
             self.me = me
             leaderID = me
             role = .leader
+            leadingRelay = relay
             host.start()
+            if let relay { openRoom(on: relay, for: core) }
             sent([])
             startReporting()
         } catch {
             alert = "Couldn't start the squad's link: \(error.localizedDescription)"
         }
+    }
+
+    private var leadingRelay: RelayAddress?
+
+    /// The squad's room on its relay. Members' links arrive through it exactly as they do from
+    /// the local network, and the core treats them the same.
+    private func openRoom(on relay: RelayAddress, for core: SquadCore<NoMission>) {
+        let id = core.squadID
+        let room = RelayLinkHost(address: relay, squad: id, token: try? keychain.relayToken(for: id),
+                                 keys: core.linkKeys(now: .now), invites: core.relayInvites(now: .now))
+        room.onOpened = { [weak self] peer, identity in
+            MainActor.assumeIsolated { self?.core?.linkOpened(peer, identity: identity) }
+        }
+        room.onMessage = { [weak self] message, peer in
+            MainActor.assumeIsolated {
+                guard let self, let out = self.core?.handle(message, from: peer, now: .now) else { return }
+                self.sent(out)
+            }
+        }
+        room.onPeerClosed = { [weak self] peer in MainActor.assumeIsolated { self?.core?.peerClosed(peer) } }
+        room.onToken = { [weak self] token in MainActor.assumeIsolated { try? self?.keychain.save(relayToken: token, for: id) } }
+        room.onStatus = { [weak self] status in
+            MainActor.assumeIsolated {
+                switch status {
+                case .connecting: self?.relayNote = "Relay: connecting…"
+                case .open: self?.relayNote = "Relay: open"
+                case .retrying: self?.relayNote = "Relay: can't reach it. Trying again…"
+                case let .stopped(why): self?.relayNote = "Relay: off. \(why)"
+                }
+            }
+        }
+        relayHost = room
+        relayNote = "Relay: connecting…"
+        room.start()
     }
 
     /// After anything the core did: send what it asked, tell the link who may connect now, show
@@ -167,6 +224,8 @@ final class AppModel {
         guard let core, let host else { return }
         host.send(out)
         host.setKeys(core.linkKeys(now: .now))
+        relayHost?.send(out)
+        relayHost?.setKeys(core.linkKeys(now: .now), invites: core.relayInvites(now: .now))
         squad = core.squad
         positions = core.positions
         if let invite, invite.isExpired(now: .now) || !core.invitations.contains(where: { $0.secret == invite.enrol }) {
@@ -180,6 +239,8 @@ final class AppModel {
         guard var core else { return }
         core.closeJoining()
         invite = core.openJoining(now: .now, by: squad?.members.first { $0.id == me }?.name)
+        // The invite names the relay only once the relay has a room for this squad.
+        if let relayHost, relayHost.hasRoom { invite?.relay = relayHost.address }
         self.core = core
         sent([])
     }
@@ -198,11 +259,18 @@ final class AppModel {
     /// Ends the squad: everyone is cut off and nothing of it is kept.
     func endSquad() {
         guard role == .leader, let id = core?.squadID else { return }
-        if let out = core?.resetSquad(now: .now) { host?.send(out) }
-        // Let the goodbyes go before the link closes.
-        let host = host
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { host?.stop() }
+        if let out = core?.resetSquad(now: .now) {
+            host?.send(out)
+            relayHost?.send(out)
+        }
+        // Let the goodbyes go before the links close. The relay forgets the squad too.
+        let host = host, relayHost = relayHost
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            host?.stop()
+            relayHost?.stop(endSquad: true)
+        }
         try? keychain.removeLeaderKeys(for: id)
+        try? keychain.removeRelayToken(for: id)
         try? FileManager.default.removeItem(at: leaderFile)
         clear()
     }
@@ -212,7 +280,7 @@ final class AppModel {
     private func saveLeader() {
         guard let core, let me else { return }
         let saved = LeaderSaved(squad: core.squad, me: me, credentials: core.credentials, epoch: core.epoch,
-                                keyChanges: core.keyChanges, revision: core.revision)
+                                keyChanges: core.keyChanges, revision: core.revision, relay: leadingRelay)
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         try? JSONEncoder().encode(saved).write(to: leaderFile, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
     }
@@ -247,6 +315,7 @@ final class AppModel {
         joining = true
         let enroller = SquadEnroller(invite: invite, name: name, device: device, service: service)
         enroller.fixedEndpoint = fixedEndpoint?()
+        enroller.relayAfter = relayAfter
         enroller.onDone = { [weak self] result in
             MainActor.assumeIsolated {
                 guard let self else { return }
@@ -277,6 +346,7 @@ final class AppModel {
         let name = defaults.string(forKey: "displayName") ?? ""
         let client = SquadLinkClient(credential: credential, name: name, device: device, service: service)
         client.fixedEndpoint = fixedEndpoint?()
+        client.relayAfter = relayAfter
         client.onMessage = { [weak self] message in MainActor.assumeIsolated { self?.received(message.body) } }
         client.onStatus = { [weak self] status in MainActor.assumeIsolated { self?.linkChanged(status, squad: credential.squad) } }
         client.onCredentialChanged = { [weak self] new in MainActor.assumeIsolated { try? self?.keychain.save(new) } }
@@ -315,10 +385,13 @@ final class AppModel {
         switch status {
         case .connected:
             linkProblem = nil
+            relayNote = client?.isRelayed == true ? "Connected through the relay" : nil
             report()
         case .searching, .connecting:
+            relayNote = nil
             linkProblem = "Looking for \(squad?.name ?? "the squad")…"
         case .reconnecting:
+            relayNote = nil
             linkProblem = "Lost the link to \(squad?.name ?? "the squad"). Trying again…"
         case let .stopped(why):
             guard role == .member, why != "Left" else { return }
@@ -346,6 +419,9 @@ final class AppModel {
         location.stop()
         client = nil
         host = nil
+        relayHost = nil
+        leadingRelay = nil
+        relayNote = nil
         core = nil
         role = .none
         squad = nil

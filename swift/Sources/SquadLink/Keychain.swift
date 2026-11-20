@@ -48,6 +48,20 @@ public struct SquadKeychain {
         try delete(account: "leader." + squad.raw.uuidString)
     }
 
+    // MARK: The leader's token for the squad's room on a relay
+
+    public func save(relayToken: Data, for squad: SquadID) throws {
+        try write(relayToken, account: "relay." + squad.raw.uuidString)
+    }
+
+    public func relayToken(for squad: SquadID) throws -> Data? {
+        try read(account: "relay." + squad.raw.uuidString)
+    }
+
+    public func removeRelayToken(for squad: SquadID) throws {
+        try delete(account: "relay." + squad.raw.uuidString)
+    }
+
     // MARK: Items
 
     private func query(_ account: String) -> [CFString: Any] {

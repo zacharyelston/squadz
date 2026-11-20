@@ -12,7 +12,7 @@ A stream of frames. Each frame is a 4-byte big-endian length, then that many byt
 - A frame that isn't valid JSON, has an unknown `type`, or lacks a required field is refused and the link is closed.
 - Unknown fields are ignored.
 
-The transport under the frames (local TLS today, a relay later) is not part of this document.
+The transport under the frames is not part of this section: the local link is §8, and a relay is [RELAY.md](RELAY.md).
 
 ## 2. The envelope
 
@@ -133,7 +133,7 @@ A squad ID as bytes is the UUID's 16 bytes in the order its text shows them.
 While joining is open the leader's device shows a QR code holding a link. The scheme is the app's (`squadz` for Squadz):
 
 ```
-squadz://join?v=1&squad=<UUID>&name=<squad name>&enrol=<secret>&cmd=<fingerprint>&tag=<tag>&exp=<seconds>&by=<device name>
+squadz://join?v=1&squad=<UUID>&name=<squad name>&enrol=<secret>&cmd=<fingerprint>&tag=<tag>&exp=<seconds>&by=<device name>&relay=<address>&relay_pin=<fingerprint>
 ```
 
 | Field | What it is |
@@ -146,6 +146,8 @@ squadz://join?v=1&squad=<UUID>&name=<squad name>&enrol=<secret>&cmd=<fingerprint
 | `tag` | The first 4 bytes of SHA-256 of the squad ID's bytes, as 8 hex characters. Must match `squad` |
 | `exp` | When it stops working, in seconds since 1970. The leader's default is 15 minutes |
 | `by` | Optional. The leader's device name, for display only |
+| `relay` | Optional. Where the squad can be reached over the internet ([RELAY.md](RELAY.md)): `wss://` and a host, with a port if it isn't 443. No path. Anything else, `ws://` included, makes the whole invite malformed |
+| `relay_pin` | Optional, only with `relay`. SHA-256 of the relay's TLS certificate, 32 bytes, base64url without padding. With it, that certificate and no other is accepted, whoever signed it. Without it, the certificate must check out the usual way |
 
 - **Scan, then confirm.** The app shows "Join *name* led by *by*?" and joins only on a tap. It never joins on a scan alone and never reads the clipboard.
 - **No long-term key is in the link.** `enrol` opens an invite link and nothing else.

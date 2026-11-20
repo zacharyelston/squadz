@@ -7,7 +7,7 @@ import PackageDescription
 //   CoreGeo   – GPS points, local east/north offsets, polygons
 //   SquadKit  – the squad protocol and the leader's state: join, roster, positions, orders,
 //               notes, files, check fire, holds, and missions as add-ons. No golf, no network.
-//   SquadLink – SquadKit over the local network: Bonjour, TLS keyed from the join code
+//   SquadLink – SquadKit over the local network (Bonjour, TLS keyed per link) and through a relay
 let package = Package(
     name: "SquadKit",
     platforms: [.iOS(.v17), .macOS(.v14)],

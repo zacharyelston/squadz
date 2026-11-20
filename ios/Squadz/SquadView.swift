@@ -21,6 +21,13 @@ struct SquadView: View {
                         .padding(8)
                         .background(.yellow.opacity(0.3))
                 }
+                if let note = model.relayNote {
+                    Label(note, systemImage: "antenna.radiowaves.left.and.right")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity)
+                        .padding(6)
+                }
                 TimelineView(.periodic(from: .now, by: 15)) { context in
                     VStack(spacing: 0) {
                         SquadMap(located: model.located, now: context.date, recenter: recenter)

@@ -5,6 +5,8 @@ import SwiftUI
 struct HomeView: View {
     @Environment(AppModel.self) private var model
     @AppStorage("displayName") private var name = ""
+    @AppStorage("relayURL") private var relayURL = ""
+    @AppStorage("relayPin") private var relayPin = ""
     @State private var squadName = ""
     @State private var scanning = false
 
@@ -20,7 +22,7 @@ struct HomeView: View {
                             .font(.system(size: 56))
                             .foregroundStyle(.tint)
                         Text("Squadz").font(.largeTitle.weight(.bold))
-                        Text("See where your squad is. No internet and no server: your phones talk to each other.")
+                        Text("See where your squad is. No internet and no server needed: your phones talk to each other.")
                             .multilineTextAlignment(.center)
                             .foregroundStyle(.secondary)
                     }
@@ -59,6 +61,22 @@ struct HomeView: View {
                     Text("Start a squad")
                 } footer: {
                     Text("Your phone leads it: the others connect to it, and it has to stay on and in reach.")
+                }
+
+                Section {
+                    TextField("Relay address", text: $relayURL, prompt: Text("relay.example.org"))
+                        .textContentType(.URL)
+                        .keyboardType(.URL)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    TextField("Certificate fingerprint", text: $relayPin, prompt: Text("Only for a relay with its own certificate"))
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .font(.footnote.monospaced())
+                } header: {
+                    Text("Relay (optional)")
+                } footer: {
+                    Text("With a relay, a squad you start can be reached over the internet as well as nearby. The relay passes messages along and can read them. Leave this empty to stay on your own network.")
                 }
             }
             .overlay {
