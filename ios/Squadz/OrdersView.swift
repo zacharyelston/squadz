@@ -120,7 +120,7 @@ struct OrdersView: View {
     private func row(_ title: String, on: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             HStack {
-                Text(title).foregroundStyle(.primary)
+                Text(title).foregroundStyle(Color.primary)
                 Spacer()
                 if on { Image(systemName: "checkmark").foregroundStyle(.tint) }
             }

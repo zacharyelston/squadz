@@ -182,7 +182,7 @@ struct SquadSettingsView: View {
                             stored = MemberDetail.stored(chosen)
                         } label: {
                             HStack {
-                                Text(detail.title).foregroundStyle(.primary)
+                                Text(detail.title).foregroundStyle(Color.primary)
                                 Spacer()
                                 if on { Image(systemName: "checkmark").foregroundStyle(.tint) }
                             }
