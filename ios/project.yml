@@ -1,0 +1,74 @@
+name: Squadz
+options:
+  bundleIdPrefix: com.zacelston.squadz
+  deploymentTarget:
+    iOS: "17.0"
+  createIntermediateGroups: true
+
+packages:
+  SquadKit:
+    path: ../swift
+
+targets:
+  Squadz:
+    type: application
+    platform: iOS
+    sources:
+      - path: Squadz
+        excludes:
+          - "Info.plist"
+    dependencies:
+      - package: SquadKit
+        product: SquadKit
+      - package: SquadKit
+        product: SquadLink
+      - package: SquadKit
+        product: CoreGeo
+    info:
+      path: Squadz/Info.plist
+      properties:
+        CFBundleDisplayName: Squadz
+        UILaunchScreen: {}
+        # An invite is a squadz://join?... link. Opening one only offers to
+        # join; nothing joins without a tap.
+        CFBundleURLTypes:
+          - CFBundleURLName: com.zacelston.squadz.join
+            CFBundleURLSchemes:
+              - squadz
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        NSCameraUsageDescription: "Squadz uses the camera to scan a squad's invite code."
+        NSLocationWhenInUseUsageDescription: "Squadz shares your position with your squad while the app is open."
+        NSLocalNetworkUsageDescription: "Squadz finds your squad's leader on the local network and connects to it directly."
+        NSBonjourServices:
+          - _squadz._tcp
+    scheme:
+      testTargets:
+        - SquadzTests
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.zacelston.squadz
+        # Signing team: set yours in Xcode, or pass DEVELOPMENT_TEAM=... to
+        # xcodebuild. It is not kept in this file.
+        CODE_SIGN_STYLE: Automatic
+        SWIFT_VERSION: "5.0"
+        MARKETING_VERSION: "0.2.0"
+        CURRENT_PROJECT_VERSION: "1"
+        TARGETED_DEVICE_FAMILY: "1,2"
+
+  SquadzTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: SquadzTests
+    dependencies:
+      - target: Squadz
+    settings:
+      base:
+        SWIFT_VERSION: "5.0"
+        GENERATE_INFOPLIST_FILE: YES

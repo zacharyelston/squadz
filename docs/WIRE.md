@@ -74,7 +74,7 @@ SquadKit writes keys in sorted order so the same message is always the same byte
 | `status` | `revision`, `squad`, `holds`, `missions` | Sent to everyone whenever the squad changes |
 | `order` | `id`, `kind`, `text`, `time`, `at`?, `to`? | No `to` means the whole squad. Text up to 140 characters |
 | `receipt` | `id`, `status`, `detail` | What happened to a note or file: `received`, `stored` or `refused` |
-| `positions` | `squad`, `positions` | To observers only |
+| `positions` | `squad`, `positions` | To observers always. To members too when the leader shares positions: each new position, and on connecting the ones already known |
 
 ### Either way
 

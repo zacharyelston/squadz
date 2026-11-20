@@ -49,6 +49,9 @@ public struct SquadCore<M: Mission> {
     /// Watchers. They get status, positions, orders and notes; what they send is ignored.
     public private(set) var observers: Set<PeerID> = []
     public private(set) var positions: [MemberID: MemberPosition] = [:]
+    /// Whether members see each other's positions, as observers always do. The leader's choice:
+    /// on for a squad that is out together, off where only the leader should know where people are.
+    public var sharesPositions: Bool
     /// The last thing that went wrong, for the leader's screen.
     public private(set) var lastProblem: String?
     /// Notes from members, oldest first (passed on to observers as they arrive).
@@ -66,7 +69,8 @@ public struct SquadCore<M: Mission> {
     /// A new squad, or one read back: `keys` from the Keychain, the rest from where the app
     /// saved it.
     public init(squad: Squad, mission: M, keys: LeaderKeys = LeaderKeys(), credentials: [CredentialRecord] = [],
-                epoch: Int = 0, keyChanges: [LeaderKeyChange] = [], revision: Int = 0) {
+                epoch: Int = 0, keyChanges: [LeaderKeyChange] = [], revision: Int = 0, sharesPositions: Bool = false) {
+        self.sharesPositions = sharesPositions
         self.squad = squad
         self.mission = mission
         self.keys = keys
@@ -173,7 +177,7 @@ public struct SquadCore<M: Mission> {
         case var .position(p):
             p.member = member
             positions[member] = p
-            return view.observerPeers.map { Outgoing(to: $0, .positions(PositionsReport(squad: squadID, positions: [p]))) }
+            return report(p, except: peer)
         case var .note(n):
             n.author = squad.members.first { $0.id == member }?.name ?? n.author
             notes.append(n)
@@ -267,8 +271,10 @@ public struct SquadCore<M: Mission> {
         peers[peer] = id
         // Orders for this member that it hasn't finished, so a rejoin (or a late joiner) has them.
         let open = orders.filter { $0.isFor(id) && acks[$0.id]?[id] != .done && acks[$0.id]?[id] != .cannot }.suffix(10)
+        let known = sharesPositions ? positions.values.filter { $0.member != id }.sorted { $0.time < $1.time } : []
         return changes + [Outgoing(to: peer, .welcome(Welcome(member: id, squad: squad)))]
             + open.map { Outgoing(to: peer, .order($0)) } + changed(now: now)
+            + (known.isEmpty ? [] : [Outgoing(to: peer, .positions(PositionsReport(squad: squadID, positions: known)))])
     }
 
     /// A link went away without a bye (the transport noticed).
@@ -352,7 +358,14 @@ public struct SquadCore<M: Mission> {
         var p = position
         p.member = member
         positions[member] = p
-        return view.observerPeers.map { Outgoing(to: $0, .positions(PositionsReport(squad: squadID, positions: [p]))) }
+        return report(p, except: nil)
+    }
+
+    /// A new position, to everyone who sees positions except the link it came from.
+    private func report(_ p: MemberPosition, except sender: PeerID?) -> [Outgoing] {
+        let members = sharesPositions ? peers.keys.filter { $0 != sender } : []
+        return (Array(observers) + members).sorted { $0.raw < $1.raw }
+            .map { Outgoing(to: $0, .positions(PositionsReport(squad: squadID, positions: [p]))) }
     }
 
     /// Sends an order to some members (`to`), or to the whole squad (nil). Observers see it too.
