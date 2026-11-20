@@ -37,9 +37,12 @@ final class SquadCoreTests: XCTestCase {
 
     func testJoinCodesRejoinAndRemoval() throws {
         let y = Yard(mission: NoMission())
-        XCTAssertNil(y.join("Eve", code: "WRONG1"))
-        XCTAssertTrue(y.has("Eve") { $0 == .refused("Wrong join code.") })
+        // A link the transport hasn't vouched for can't join.
+        y.net.add(y.peer("Eve")) { [unowned y] m, _ in y.got["Eve", default: []].append(m.body); return [] }
+        y.send("Eve", .hello(EnrolmentRequest(name: "Eve", device: UUID()).hello))
+        XCTAssertTrue(y.has("Eve") { if case .refused = $0 { return true }; return false })
         XCTAssertTrue(y.host.squad.members.isEmpty)
+        XCTAssertTrue(y.host.credentials.isEmpty)
 
         let ana = try XCTUnwrap(y.join("Ana"))
         let ben = try XCTUnwrap(y.join("Ben"))
@@ -59,8 +62,14 @@ final class SquadCoreTests: XCTestCase {
         y.command { $0.removeMember(ana, now: $1) }
         XCTAssertEqual(y.host.squad.members.map(\.id), [ben])
         XCTAssertNil(y.host.positions[ana])
+        XCTAssertTrue(y.has("Ana") { $0 == .refused("Removed from the squad.") })
         y.send("Ana", .checkFire(CheckFire(by: "Ana")))
         XCTAssertTrue(y.host.holds(now: y.now).isEmpty)
+        // And the credential no longer opens a link.
+        XCTAssertNil(y.host.view.peer(of: ana))
+        y.join("Ana")
+        XCTAssertEqual(y.host.squad.members.map(\.id), [ben])
+        XCTAssertFalse(y.host.linkKeys(now: y.now).contains(y.credentials["Ana"]!.linkKey))
 
         // A contributor is for some other kind of host.
         y.join("Cam", role: .contributor)
@@ -68,9 +77,9 @@ final class SquadCoreTests: XCTestCase {
     }
 
     func testOtherProtocolVersionsAreRefused() {
-        var host = SquadCore(squad: Squad(name: "Red"), mission: NoMission(), joinCode: "RED234")
+        var host = SquadCore(squad: Squad(name: "Red"), mission: NoMission())
         let out = host.handle(SquadMessage(protocolVersion: SquadProtocol.version + 1, seq: 1,
-                                           body: .hello(Hello(name: "Ana", device: UUID(), joinCode: "RED234"))),
+                                           body: .hello(Hello(name: "Ana", device: UUID()))),
                               from: PeerID("p"), now: Date())
         guard case .refused = out.first?.body else { return XCTFail("\(out)") }
         XCTAssertTrue(host.squad.members.isEmpty)
@@ -239,7 +248,7 @@ final class SquadCoreTests: XCTestCase {
                     y.net.sendRaw(from: from, to: y.leader, bytes)
                 } else {
                     var pick = Samples.all()
-                    pick.append(.hello(Hello(name: "Mal", device: UUID(), joinCode: "RED234")))
+                    pick.append(.hello(EnrolmentRequest(name: "Mal", device: UUID()).hello))
                     pick.append(.mission(MissionMessage(id: "test.rally", version: 1, payload: Data(#"{"arrived":true}"#.utf8))))
                     pick.append(.mission(MissionMessage(id: "test.rally", version: 1, payload: Data(#"{"arrived":false}"#.utf8))))
                     y.net.send(from: from, [Outgoing(to: y.leader, pick[Int.random(in: 0..<pick.count, using: &g)])])

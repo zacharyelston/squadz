@@ -1,0 +1,32 @@
+{
+  "binding" : "c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7",
+  "code" : "RED234",
+  "codeLink" : {
+    "identity" : "code",
+    "key" : "84c1905b839799143fc54eac4c544e403c5cd6a824212a3a1bb2c1ca5bef796f"
+  },
+  "credentialID" : "6465666768696a6b6c6d6e6f70717273",
+  "enrolled" : "{\"credential\":{\"epoch\":3,\"id\":\"ZGVmZ2hpamtsbW5vcHFycw==\",\"issued\":1800000000000,\"key\":\"BLeePX3Po/ERgfRvJHr1bAZ7DvUyUPwY6b6Cwj5vgz/uiSRwQWN6hkQvRYt4pcQ5YLuszD6xTInlrpra9PeUVTA=\",\"sealed\":\"oKGio6SlpqeoqaqrVi0kFeXaS+l+ZFmspvpe8f/doaeoyBHh5CSwIV22BYs4p5Fp8XmqB5XD9jDATcVk\"},\"leader\":\"BHjvsP948IWkmmfxy5IlVKL1YlPzamUsUSwvBFWYblUbFsxc0FE7G4ovorJMtGVD7/QBgaRZMa3H8JQv13S14+g=\",\"member\":\"00000000-0000-4000-8000-000000000002\",\"name\":\"Red Squad\",\"role\":\"member\",\"signature\":\"ZDBLYSCqZ39gUUSi+SsLddQoq2U+1BmpE4zqann9DwIwoBIXQAJt/WOoUrz3VDDfuO2L7jNv9gljalKP0PqQHA==\",\"squad\":\"00000000-0000-4000-8000-000000000001\"}",
+  "epoch" : 3,
+  "fingerprint" : "a9592102806752b805dea414d0929fd695f0effc497c39f504127c1b3603b89e",
+  "hello" : "{\"device\":\"00000000-0000-4000-8000-000000000003\",\"key\":\"BM4Xbd0w3lu/uA8TH8+r+Rrq/eOvGNmVaenvE8wOlXFOcMDY0tiVhlB46D0saqBDi2JJqZHdceA5jBO5R8Xd864=\",\"name\":\"Ana\",\"nonce\":\"jI2Oj5CRkpOUlZaXmJmamw==\"}",
+  "identityPrivate" : "28292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f4041424344454647",
+  "identityPublic" : "0478efb0ff78f085a49a67f1cb922554a2f56253f36a652c512c2f0455986e551b16cc5cd0513b1b8a2fa2b24cb46543eff40181a45931adc7f0942fd774b5e3e8",
+  "inviteLink" : {
+    "identity" : "e:7d950dda1688ba0b",
+    "key" : "09e95f4f15c9f7f282738eeb9aed8e1f4bec3595c1c7ce42c2e37758552f8359"
+  },
+  "inviteSecret" : "78797a7b7c7d7e7f8081828384858687",
+  "inviteURL" : "squadz://join?v=1&squad=00000000-0000-4000-8000-000000000001&name=Red%20Squad&enrol=eHl6e3x9fn-AgYKDhIWGhw&cmd=qVkhAoBnUrgF3qQU0JKf1pXw7_xJfDn1BBJ8GzYDuJ4&tag=86a42775&exp=1800000000&by=Club%20iPad",
+  "leaderKeyChange" : "{\"key\":\"BEelGJ3O7+LRvduu5IbQeUCXQ/cMGgJzkTr5V0Af3WqA6oGbLsAf9d0SzjdEHHQVQNUA8EB01qIhO+uOq0IALBg=\",\"signature\":\"wqrYu4HsbRwZGDYCuyfUVUZE9I0/nKeZ3lDEKH0q8ethgvh+txeqTY4P+YPq12fT5JiefKicsXXxHPDnfPe6Bg==\",\"squad\":\"00000000-0000-4000-8000-000000000001\",\"time\":1800000000000}",
+  "memberLink" : {
+    "identity" : "m:6465666768696a6b6c6d6e6f70717273",
+    "key" : "2bf30c2621bd47a1d9ac9b78ba9dc100b5b284d7861929fdff069502781a435a"
+  },
+  "memberOneTimePrivate" : "3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b",
+  "memberProof" : "fd26798de633f8453eadfca0c1d4a7c110487a459b997cdb61a4754f08fe8b59",
+  "memberSecret" : "be773e3c1841cae3d3fc914abe8bff147604284863e70e1c25a46c679297d1ce",
+  "root" : "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20",
+  "squad" : "00000000-0000-4000-8000-000000000001",
+  "tag" : "86a42775"
+}

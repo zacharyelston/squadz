@@ -1,6 +1,6 @@
 # Moving BackyardBallistics onto SquadKit
 
-What BackyardBallistics has to change to depend on this package (issue #2, V1 and V2). Nothing in BackyardBallistics has been changed yet; this is the list for that PR.
+What BackyardBallistics has to change to depend on this package (issue #2, V1, V2 and V2b). Nothing in BackyardBallistics has been changed yet; this is the list for that PR.
 
 Written against BackyardBallistics `origin/main` at `d6afe77`.
 
@@ -9,7 +9,7 @@ Written against BackyardBallistics `origin/main` at `d6afe77`.
 - Add this repository as a package dependency, pinned to a tag, and depend on `SquadKit`, `SquadLink` and `CoreGeo`.
 - Delete `Sources/CoreGeo` from SpudCore: `Geo.swift` here is the same file. Targets that import CoreGeo take it from this package.
 - GroupKit keeps the golf: `GolfMission.swift`, `GroupGate.swift`, the golf message types, and `CourseFingerprint` (it was in `Wire.swift`). It deletes `Mission.swift`, `SquadCore.swift`, `Loopback.swift`, and the core parts of `Messages.swift`, `Wire.swift` and `FieldNotes.swift`.
-- GroupLink goes away. Pass `SquadService(type: "_spudgolf._tcp", app: "SpudGunGolf")` to SquadLink's types: that gives the same Bonjour type, TLS key and PSK identity as today.
+- GroupLink goes away. Pass `SquadService(type: "_spudgolf._tcp", app: "SpudGunGolf", scheme: "spudgolf")` to SquadLink's types: that keeps the Bonjour type, and makes invites `spudgolf://join?…` links. The TLS keys are new (see "Joining" below), so a v6 app and a v7 app can't link; they couldn't anyway, since v7 refuses v6.
 
 ## Names
 
@@ -62,3 +62,17 @@ Issue #2 asks that every GroupKit, GroupLink and safety test passes "unchanged".
 
 - Whether `SquadCore` should run several missions at once. It runs one, as in BackyardBallistics today; `status.missions` is already a list.
 - `Hello.Role.contributor` and the file messages exist for the Theater host, which is not a squad. They may belong in a Theater mission or their own small protocol later.
+
+## Joining (V2b)
+
+The shared join code is gone as a key. [`WIRE.md`](WIRE.md) §7 and §8 are the rules; in code:
+
+- **The leader's iPad** keeps `LeaderKeys` in the Keychain (`SquadKeychain.save(_:for:)`) and saves `SquadCore.credentials`, `epoch` and `keyChanges` with the round (no secrets in them). `SquadCommand.Saved` drops the join code.
+- **Wiring the host:** `host.onOpened` → `core.linkOpened`, and after every core call `host.setKeys(core.linkKeys(now:))`. `Outgoing.thenClose` is handled by `SquadLinkHost.send`.
+- **"Open joining"** replaces showing the code: `core.openJoining(now:typedCode:by:)` returns the invite to draw as a QR code; `core.joinCode` is the typed code while it is open. `closeJoining()`, `inviteOne(now:)`.
+- **A phone or the Theater** scans, confirms on a tap, runs `SquadEnroller`, saves the `MemberCredential` in the Keychain, and then runs `SquadLinkClient(credential:)`. Remembering codes locally goes away. The app needs the camera permission and must register the `spudgolf` scheme only if it wants links to open it; a scan needs neither a registered scheme nor the clipboard.
+- **`Hello`** has no `joinCode`. `GroupClient`'s "check the code" stop becomes `SquadLinkClient.notAccepted` (ask for a new invite).
+- **Remove member** now revokes: `removeMember` closes the link and the device can't come back. **Reset squad** is `resetSquad(now:)`.
+- **The Theater door** (contributor credentials) is not in this package: it is a different host, and it can use `LeaderKeys`, `SealedCredential` and `LinkKey` the same way.
+- Not done here: the LoRa epoch key and its re-key on removal (SQUAD_COMMS Part 2).
+

@@ -20,6 +20,10 @@ public struct SquadMessage: Equatable, Sendable {
     }
 
     public enum Body: Equatable, Sendable {
+        /// The first frame on a link, for the transport: which key the sender holds. The core
+        /// never sees it.
+        case link(LinkProof)
+
         // Member's phone → leader
         case hello(Hello)
         case bye
@@ -35,6 +39,10 @@ public struct SquadMessage: Equatable, Sendable {
         case fileDone(UUID)
 
         // Leader → member's phone (and to observers: status, positions, orders and notes only)
+        /// To a device on an invite link: its credential. The link closes after it.
+        case enrolled(Enrolled)
+        /// The leader's device has a new identity key.
+        case leaderKey(LeaderKeyChange)
         case welcome(Welcome)
         /// To a watcher that joined as an observer.
         case observing(Squad)
@@ -59,6 +67,9 @@ extension SquadMessage: Codable {
     /// The `type` on the wire.
     public var type: String {
         switch body {
+        case .link: return "link"
+        case .enrolled: return "enrolled"
+        case .leaderKey: return "leaderKey"
         case .hello: return "hello"
         case .bye: return "bye"
         case .position: return "position"
@@ -86,6 +97,9 @@ extension SquadMessage: Codable {
         try c.encode(type, forKey: .type)
         switch body {
         case .bye: break
+        case let .link(x): try c.encode(x, forKey: .body)
+        case let .enrolled(x): try c.encode(x, forKey: .body)
+        case let .leaderKey(x): try c.encode(x, forKey: .body)
         case let .hello(x): try c.encode(x, forKey: .body)
         case let .position(x): try c.encode(x, forKey: .body)
         case let .orderAck(x): try c.encode(x, forKey: .body)
@@ -112,6 +126,9 @@ extension SquadMessage: Codable {
         let type = try c.decode(String.self, forKey: .type)
         func value<T: Decodable>(_: T.Type = T.self) throws -> T { try c.decode(T.self, forKey: .body) }
         switch type {
+        case "link": body = .link(try value())
+        case "enrolled": body = .enrolled(try value())
+        case "leaderKey": body = .leaderKey(try value())
         case "hello": body = .hello(try value())
         case "bye": body = .bye
         case "position": body = .position(try value())
@@ -139,9 +156,13 @@ extension SquadMessage: Codable {
 public struct Outgoing: Equatable, Sendable {
     public var to: PeerID
     public var body: SquadMessage.Body
-    public init(to: PeerID, _ body: SquadMessage.Body) {
+    /// The transport closes the link once this is sent: an invite link after its answer, or a
+    /// member who was removed.
+    public var thenClose: Bool
+    public init(to: PeerID, _ body: SquadMessage.Body, thenClose: Bool = false) {
         self.to = to
         self.body = body
+        self.thenClose = thenClose
     }
 
     /// One of mission `M`'s own messages.
