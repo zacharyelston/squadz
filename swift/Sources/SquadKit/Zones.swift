@@ -39,4 +39,3 @@ public struct ZoneEvent: Codable, Equatable, Identifiable, Sendable {
         memberName = member.name; self.kind = kind; self.time = time
     }
 }
-

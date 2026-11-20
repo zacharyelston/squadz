@@ -119,6 +119,8 @@ A mission has an ID (like `golf.firemission`) and its own version. Its messages 
 
 A squad with no mission sends no mission sections and ignores every `mission` message.
 
+A `payload` is opaque to the core: a mission may use JSON, bytes, or both. Squad video ([VIDEO.md](VIDEO.md)) is the first mission written down here.
+
 ## 7. Joining
 
 An invite lets a new device in once. The leader's device answers with a **credential** only that device can read, and from then on the device connects with the credential. The typed code and the invite stop mattering once a device is in, so they can be short-lived.

@@ -11,6 +11,8 @@ struct SquadView: View {
     @State private var inviting = false
     @State private var choosingDetails = false
     @State private var confirmingLeave = false
+    @State private var confirmingStream = false
+    @State private var reviewing = false
     @State private var recenter = 0
     @State private var panel = LeaderPanel.Tab.team
     @State private var draft = OrderDraft()
@@ -38,12 +40,27 @@ struct SquadView: View {
             Group {
                 if leading { leaderScreen } else { memberScreen }
             }
-            .safeAreaInset(edge: .top, spacing: 0) { zoneBanner }
+            .safeAreaInset(edge: .top, spacing: 0) {
+                VStack(spacing: 0) { banners; zoneBanner }
+            }
             .navigationTitle(model.squad?.name ?? "")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button(leading ? "End" : "Leave", role: .destructive) { confirmingLeave = true }
+                }
+                if !leading {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button(model.isStreaming ? "Stop streaming" : "Stream to the leader", systemImage: model.isStreaming ? "video.fill" : "video") {
+                            if model.isStreaming { model.stopStreaming() } else { confirmingStream = true }
+                        }
+                        .tint(model.isStreaming ? .red : nil)
+                    }
+                }
+                if leading {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("Mission log", systemImage: "list.bullet.clipboard") { reviewing = true }
+                    }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Squad settings", systemImage: "gearshape") { choosingDetails = true }
@@ -63,6 +80,19 @@ struct SquadView: View {
             } message: {
                 Text(leading ? "Everyone is disconnected and has to join a new squad." : "You'll need a new invite to come back.")
             }
+            .confirmationDialog("Stream this phone's camera to \(squadName)'s leader?", isPresented: $confirmingStream, titleVisibility: .visible) {
+                Button("Start streaming") { model.startStreaming() }
+            } message: {
+                Text("Only the leader's device sees it. The squad can see that you are streaming, and this phone tells you if the leader records it or keeps a still.")
+            }
+            .sheet(isPresented: $reviewing) {
+                NavigationStack {
+                    if let id = model.missionID, let info = model.logs.info(id) {
+                        MissionLogView(mission: info, live: true)
+                            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { reviewing = false } } }
+                    }
+                }
+            }
             .sheet(isPresented: $inviting) { InviteView() }
             .sheet(isPresented: $choosingDetails) { SquadSettingsView(leading: leading) }
         }
@@ -72,7 +102,6 @@ struct SquadView: View {
 
     private var leaderScreen: some View {
         VStack(spacing: 0) {
-            banners
             TimelineView(.periodic(from: .now, by: 15)) { context in
                 let layout = wide ? AnyLayout(HStackLayout(spacing: 0)) : AnyLayout(VStackLayout(spacing: 0))
                 layout {
@@ -93,7 +122,6 @@ struct SquadView: View {
     private var memberScreen: some View {
         TabView(selection: $memberTab) {
             VStack(spacing: 0) {
-                banners
                 // A new order comes to the front here; once it's seen, the next one to do shows.
                 if let shown = model.newOrder ?? model.queue.first {
                     NextOrderLine(order: shown, isNew: model.newOrder != nil, waiting: model.queue.count) { memberTab = .orders }
@@ -120,7 +148,7 @@ struct SquadView: View {
                 .tag(MemberTab.orders)
                 .badge(model.queue.count)
 
-            VStack(spacing: 0) { banners; ZonesPanel(draft: .constant(nil), drawing: .constant(false)) }
+            VStack(spacing: 0) { ZonesPanel(draft: .constant(nil), drawing: .constant(false)) }
                 .tabItem { Label("Zones", systemImage: "circle.dashed") }
                 .tag(MemberTab.zones)
 
@@ -144,6 +172,28 @@ struct SquadView: View {
     }
 
     @ViewBuilder private var banners: some View {
+        if model.isStreaming {
+            HStack {
+                Label(model.streamingNote, systemImage: "video.fill")
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+                Button("Stop") { model.stopStreaming() }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.white)
+                    .foregroundStyle(.red)
+                    .controlSize(.small)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(.red)
+            .foregroundStyle(.white)
+        } else if let stream = model.streams.first, !leading {
+            Label("\(model.name(of: stream.member)) is streaming to the leader\(stream.recording ? ", and being recorded" : "")", systemImage: "video")
+                .font(.footnote)
+                .frame(maxWidth: .infinity)
+                .padding(6)
+                .background(.red.opacity(0.15))
+        }
         if let problem = model.linkProblem {
             Label(problem, systemImage: "wifi.exclamationmark")
                 .font(.footnote)
@@ -226,9 +276,89 @@ struct MapButtonStyle: ButtonStyle {
     }
 }
 
+/// On the leader's device: the stream someone is sending, and the button that ends it.
+struct VideoPanel: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if let stream = model.streams.first {
+                HStack {
+                    Label("\(model.name(of: stream.member)), since \(stream.since.formatted(date: .omitted, time: .shortened))", systemImage: "video.fill")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.red)
+                    Spacer()
+                    Button("Stop", role: .destructive) { model.stopStream(stream.id) }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                }
+                VideoLayerView(display: model.display)
+                    .background(.black)
+                    .clipShape(.rect(cornerRadius: 10))
+                HStack {
+                    Button(model.isRecording ? "Stop recording" : "Record", systemImage: model.isRecording ? "stop.circle.fill" : "record.circle") {
+                        if model.isRecording { model.stopRecording() } else { model.startRecording() }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(model.isRecording ? .red : .accentColor)
+                    Button("Snap", systemImage: "camera") { model.snap() }
+                        .buttonStyle(.bordered)
+                    Spacer()
+                }
+                Text(model.captureNote ?? (model.isRecording
+                     ? "Recording to this squad's mission log. \(model.name(of: stream.member)) and the squad can see that it is."
+                     : "Only this device sees the stream. Nothing is kept unless you record or snap, and the squad is told when you do."))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                Text("Nobody is streaming.")
+                    .font(.subheadline.weight(.semibold))
+                Text("A member can start from the camera button on their phone. To ask someone, send them a Stream video order; their camera still starts only when they tap.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: 0)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.bottom, 10)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+}
+
+/// The layer the decoder draws on.
+struct VideoLayerView: UIViewRepresentable {
+    let display: H264Display
+
+    final class Holder: UIView {
+        var video: CALayer? {
+            didSet {
+                oldValue?.removeFromSuperlayer()
+                if let video { layer.addSublayer(video) }
+            }
+        }
+        override func layoutSubviews() {
+            super.layoutSubviews()
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            video?.frame = bounds
+            CATransaction.commit()
+        }
+    }
+
+    func makeUIView(context: Context) -> Holder {
+        let view = Holder()
+        view.video = display.layer
+        return view
+    }
+
+    func updateUIView(_ view: Holder, context: Context) {
+        if view.video !== display.layer { view.video = display.layer }
+    }
+}
+
 /// Beside the leader's map: the team, or orders.
 struct LeaderPanel: View {
-    enum Tab: Hashable { case team, orders, zones, notes }
+    enum Tab: Hashable { case team, orders, zones, notes, video }
 
     @Environment(AppModel.self) private var model
     @Binding var tab: Tab
@@ -245,6 +375,7 @@ struct LeaderPanel: View {
                 Text(model.openOrders.isEmpty ? "Orders" : "Orders (\(model.openOrders.count))").tag(Tab.orders)
                 Text("Zones").tag(Tab.zones)
                 Text(model.unreadNotes == 0 || tab == .notes ? "Notes" : "Notes (\(model.unreadNotes))").tag(Tab.notes)
+                Text(model.streams.isEmpty ? "Video" : "Video ●").tag(Tab.video)
             }
             .pickerStyle(.segmented)
             .padding(.horizontal, 12)
@@ -254,6 +385,7 @@ struct LeaderPanel: View {
             case .orders: OrdersPanel(draft: $draft, placing: $placing)
             case .zones: ZonesPanel(draft: $zoneDraft, drawing: $drawingZone)
             case .notes: NotesView()
+            case .video: VideoPanel()
             }
         }
         .background(Color(.systemBackground))

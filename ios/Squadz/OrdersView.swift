@@ -5,9 +5,16 @@ import SwiftUI
 // Orders: the leader tasks one member, several, or the whole squad, and each answers Seen, Done
 // or Can't. The squad core carries them (docs/WIRE.md); this is the app's side.
 
+extension Order.Kind {
+    /// A title for the kinds this app knows: the core's, and squad video's.
+    var appTitle: String? {
+        coreTitle ?? (self == VideoMission.streamOrder ? "Stream video" : nil)
+    }
+}
+
 extension Order {
     /// What to call it: the kind, for the kinds this app knows, or its text.
-    var title: String { kind.coreTitle ?? (text.isEmpty ? "Order" : text) }
+    var title: String { kind.appTitle ?? (text.isEmpty ? "Order" : text) }
 }
 
 extension OrderAck.Response {
@@ -24,7 +31,7 @@ extension OrderAck.Response {
 /// away to tap the map.
 struct OrderDraft: Equatable {
     /// The kinds this app offers. Capture waits for the app to take photos.
-    static let kinds: [Order.Kind] = [.moveTo, .holdPosition, .note]
+    static let kinds: [Order.Kind] = [.moveTo, .holdPosition, .note, VideoMission.streamOrder]
     static let pinID = UUID()
 
     /// Empty means the whole squad.
@@ -96,7 +103,7 @@ struct OrdersPanel: View {
             }
         }
         Picker("Kind", selection: $draft.kind) {
-            ForEach(OrderDraft.kinds, id: \.self) { Text($0.coreTitle ?? $0.rawValue).tag($0) }
+            ForEach(OrderDraft.kinds, id: \.self) { Text($0.appTitle ?? $0.rawValue).tag($0) }
         }
         .pickerStyle(.segmented)
         if draft.needsPlace {
@@ -169,7 +176,7 @@ struct OrdersPanel: View {
                         .controlSize(.small)
                 }
             }
-            if !order.text.isEmpty, order.kind.coreTitle != nil { Text(order.text).font(.subheadline) }
+            if !order.text.isEmpty, order.kind.appTitle != nil { Text(order.text).font(.subheadline) }
             Text(model.cancelledOrders.contains(order.id) ? "Cancelled"
                  : Self.answers(to: order, from: model.recipients(of: order), given: model.answers[order.id] ?? [:]))
                 .font(.footnote)
@@ -243,7 +250,7 @@ struct NextOrderLine: View {
         if let place = order.at, let mine = model.located.first(where: { $0.isMe })?.position?.at {
             parts.append("\(MemberList.length(Geo.distance(mine, place))) \(MemberList.compass(Geo.bearing(from: mine, to: place)))")
         }
-        if !order.text.isEmpty, order.kind.coreTitle != nil { parts.append(order.text) }
+        if !order.text.isEmpty, order.kind.appTitle != nil { parts.append(order.text) }
         return parts.joined(separator: " · ")
     }
 }
@@ -278,7 +285,7 @@ struct MemberOrdersView: View {
                                 Text(model.cancelledOrders.contains(order.id) ? "Cancelled" : model.myAnswers[order.id]?.title ?? "")
                                     .foregroundStyle(.secondary)
                             }
-                            if !order.text.isEmpty, order.kind.coreTitle != nil { Text(order.text).font(.subheadline) }
+                            if !order.text.isEmpty, order.kind.appTitle != nil { Text(order.text).font(.subheadline) }
                             Text(order.time.formatted(date: .omitted, time: .shortened)).font(.footnote).foregroundStyle(.secondary)
                         }
                         .opacity(0.6)
@@ -308,7 +315,7 @@ struct OrderCard: View {
                 Text("\(order.to == nil ? "Whole squad" : "You") · \(order.time.formatted(date: .omitted, time: .shortened))")
                     .font(.caption).foregroundStyle(.secondary)
             }
-            if !order.text.isEmpty, order.kind.coreTitle != nil { Text(order.text) }
+            if !order.text.isEmpty, order.kind.appTitle != nil { Text(order.text) }
             if let place = order.at {
                 if let mine = model.located.first(where: { $0.isMe })?.position?.at {
                     Text("\(MemberList.length(Geo.distance(mine, place))) \(MemberList.compass(Geo.bearing(from: mine, to: place))) of you. The flag on the map.")
@@ -326,6 +333,19 @@ struct OrderCard: View {
                         .tint(chosen ? .accentColor : .gray)
                         .fontWeight(chosen ? .bold : .regular)
                 }
+            }
+            // Being asked is not starting: the camera comes on only when this is tapped.
+            if order.kind == VideoMission.streamOrder {
+                Button(model.isStreaming ? "Stop streaming" : "Start streaming", systemImage: model.isStreaming ? "stop.circle" : "video") {
+                    if model.isStreaming {
+                        model.stopStreaming()
+                    } else {
+                        model.startStreaming()
+                        if model.myAnswers[order.id] == nil { model.answer(order, .seen) }
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(model.isStreaming ? .red : .accentColor)
             }
         }
         .padding(12)

@@ -48,7 +48,7 @@ targets:
           - UIInterfaceOrientationPortraitUpsideDown
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
-        NSCameraUsageDescription: "Squadz uses the camera to scan a squad's invite code."
+        NSCameraUsageDescription: "Squadz uses the camera to scan a squad's invite code, and to stream what you see to your squad's leader when you choose to."
         NSLocationWhenInUseUsageDescription: "Squadz shares your position with your squad while the app is open."
         NSLocalNetworkUsageDescription: "Squadz finds your squad's leader on the local network and connects to it directly."
         NSBonjourServices:

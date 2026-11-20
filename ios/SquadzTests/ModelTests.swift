@@ -1,3 +1,4 @@
+import AVFoundation
 import CoreLocation
 import CoreGeo
 import Network
@@ -73,11 +74,28 @@ final class ModelTests: XCTestCase {
         XCTAssertEqual(member.zoneEvents.first?.kind, .arrived)
         XCTAssertEqual(leader.zoneAlert?.id, member.zoneAlert?.id)
         XCTAssertTrue(member.orders.isEmpty)
+        let mission = try XCTUnwrap(leader.missionID)
+        XCTAssertEqual(leader.logs.entries(of: mission).filter { $0.kind == .zoneArrival }.count, 1)
+        let corners = [(-100.0, -100.0), (100.0, -100.0), (100.0, 100.0), (-100.0, 100.0)]
+            .map { Geo.offset(center, east: $0.0, north: $0.1) }
+        let allowed = SquadZone(name: "Search area", shape: .polygon(vertices: corners), rule: .allowedArea, members: [ben])
+        XCTAssertTrue(leader.saveZone(allowed))
+        try await wait("polygon received") { member.zones.count == 2 }
+        for (index, east) in [0.0, 0, 150, 150].enumerated() {
+            let time = base.addingTimeInterval(Double(index + 4))
+            member.setMyPosition(MemberPosition(at: Geo.offset(center, east: east, north: 0), accuracy: 3, time: time), member: ben)
+            try await wait("boundary position received") { leader.positions[ben].map { abs($0.time.timeIntervalSince(time)) < 0.001 } == true }
+        }
+        try await wait("departure delivered") { member.zoneEvents.count == 2 }
+        XCTAssertEqual(member.zoneEvents.last?.kind, .left)
+        XCTAssertEqual(leader.logs.entries(of: mission).filter { $0.kind == .zoneDeparture }.count, 1)
         let restored = again(0)
         restored.resume()
-        XCTAssertEqual(restored.zones, [zone])
+        XCTAssertEqual(restored.zones, [zone, allowed])
         XCTAssertEqual(restored.zoneEvents, leader.zoneEvents)
         XCTAssertNil(restored.zoneAlert, "Historical events must not announce again on restart")
+        XCTAssertEqual(restored.logs.entries(of: mission).filter { $0.kind == .zoneArrival || $0.kind == .zoneDeparture }.count, 2,
+                       "Restarting must not duplicate historical zone crossings in the mission log")
         restored.endSquad()
         leader.endSquad()
     }
@@ -306,6 +324,163 @@ final class ModelTests: XCTestCase {
         XCTAssertEqual(ben.orders.count, 5, "answered and cancelled orders stay in the list")
         try await wait("the leader sees Can't") { ana.openOrders.isEmpty }
         ana.endSquad()
+    }
+
+    func testAPhoneStreamsToTheLeaderAndEitherCanStopIt() async throws {
+        let ana = model("Ana"), ben = model("Ben"), cy = model("Cy")
+        ana.startSquad(name: "Red", as: "Ana")
+        try await wait("the leader's link") { ana.hostPort != nil }
+        for (phone, name) in [(ben, "Ben"), (cy, "Cy")] {
+            point(to: ana, phone)
+            phone.videoSource = { PatternSource() }
+            ana.openJoining()
+            let shown = try XCTUnwrap(ana.invite).url(scheme: "squadz").absoluteString
+            try await wait("listener with invite key") { ana.hostIsListening }
+            phone.offer(shown)
+            phone.join(try XCTUnwrap(phone.offered), as: name)
+            try await wait("\(name) in") { phone.role == .member && phone.linkProblem == nil }
+        }
+        try await wait("everyone on the roster") { ana.squad?.members.count == 3 && cy.squad?.members.count == 3 }
+        let benID = try XCTUnwrap(ben.me)
+
+        // The leader can't stream to itself, and nothing streams until a phone starts.
+        ana.startStreaming()
+        XCTAssertFalse(ana.isStreaming)
+        XCTAssertTrue(ana.streams.isEmpty)
+
+        // Ben starts. The leader's device shows pictures; Cy can see that Ben is streaming, and gets none.
+        ben.startStreaming()
+        XCTAssertTrue(ben.isStreaming)
+        try await wait("the leader lists Ben's stream") { ana.streams.map(\.member) == [benID] }
+        try await wait("pictures on the leader's device") { ana.display.shown >= 5 }
+        try await wait("Cy sees who is streaming") { cy.streams.map(\.member) == [benID] }
+        XCTAssertEqual(cy.display.shown, 0)
+        XCTAssertEqual(ben.display.shown, 0)
+
+        // One at a time: Cy is turned down and told why.
+        cy.startStreaming()
+        try await wait("Cy is turned down") { !cy.isStreaming && cy.alert != nil }
+        XCTAssertEqual(cy.alert, "Ben is streaming. One at a time.")
+        XCTAssertEqual(ana.streams.map(\.member), [benID])
+
+        // The leader stops it: Ben's phone stops sending.
+        ana.stopStream(try XCTUnwrap(ana.streams.first?.id))
+        try await wait("Ben's phone stops") { !ben.isStreaming }
+        try await wait("nobody is listed") { ana.streams.isEmpty && cy.streams.isEmpty }
+        let shown = ana.display.shown
+        try await Task.sleep(for: .milliseconds(600))
+        XCTAssertEqual(ana.display.shown, shown, "no more pictures after the stop")
+
+        // Ben starts again. Nothing is kept until the leader says, and then everyone can see that it is.
+        ben.startStreaming()
+        try await wait("streaming again") { ana.streams.count == 1 && ana.display.shown > shown + 3 }
+        let mission = try XCTUnwrap(ana.missionID)
+        XCTAssertNil(ben.missionID, "a member's phone keeps no log")
+        XCTAssertFalse(ana.logs.entries(of: mission).contains { $0.isMedia })
+        XCTAssertEqual(ben.streamingNote, "You are streaming to the leader")
+
+        ana.startRecording()
+        XCTAssertTrue(ana.isRecording)
+        try await wait("Ben and Cy see the recording") { ben.streams.first?.recording == true && cy.streams.first?.recording == true }
+        XCTAssertEqual(ben.streamingNote, "You are streaming to the leader, and being recorded")
+        XCTAssertTrue(ana.snap())
+        try await wait("Ben sees a still was kept") { ben.streams.first?.stills == 1 }
+        XCTAssertEqual(ben.streamingNote, "You are streaming to the leader, and being recorded · 1 still kept")
+        try await Task.sleep(for: .seconds(3))   // long enough to span a key frame
+
+        // Ben stops: the clip is closed and filed in the mission's log, with the still.
+        ben.stopStreaming()
+        try await wait("stopped by Ben") { ana.streams.isEmpty }
+        try await wait("the clip is in the log") { ana.logs.entries(of: mission).contains { $0.kind == .clip } }
+        XCTAssertFalse(ana.isRecording)
+        let log = ana.logs.entries(of: mission)
+        let clip = try XCTUnwrap(log.first { $0.kind == .clip })
+        let still = try XCTUnwrap(log.first { $0.kind == .still })
+        XCTAssertEqual(clip.member, benID)
+        XCTAssertEqual(clip.name, "Ben")
+        XCTAssertGreaterThan(try XCTUnwrap(clip.seconds), 0.5)
+        let clipFile = ana.logs.media(mission, try XCTUnwrap(clip.file))
+        let stillFile = ana.logs.media(mission, try XCTUnwrap(still.file))
+        XCTAssertGreaterThan((try FileManager.default.attributesOfItem(atPath: clipFile.path)[.size] as? Int) ?? 0, 1000)
+        let played = try await AVURLAsset(url: clipFile).load(.duration).seconds
+        XCTAssertGreaterThan(played, 0.5, "the clip plays")
+        let picture = try XCTUnwrap(UIImage(contentsOfFile: stillFile.path))
+        XCTAssertEqual(picture.size.width, 320)
+
+        // The log has the rest of what happened, in order, and reads on its own.
+        XCTAssertEqual(log.first?.kind, .squadStarted)
+        XCTAssertEqual(log.filter { $0.kind == .joined }.compactMap(\.name).sorted(), ["Ben", "Cy"])
+        XCTAssertEqual(log.filter { $0.kind == .streamStarted }.count, 2)
+        XCTAssertEqual(log.filter { $0.kind == .streamStopped }.count, 2)
+        XCTAssertTrue(MissionLogView.summary(log).hasSuffix("1 clip · 1 still"), MissionLogView.summary(log))
+
+        // Orders, answers, notes and positions go in too.
+        XCTAssertTrue(ana.sendOrder(.holdPosition, text: "By the gate", to: [benID]))
+        try await wait("Ben has the order") { ben.orders.count == 1 }
+        ben.answer(try XCTUnwrap(ben.orders.first), .done)
+        XCTAssertTrue(ben.sendNote("At the gate"))
+        ben.setMyPosition(MemberPosition(at: GeoPoint(latitude: 42.37, longitude: -71.05), accuracy: 5, heading: 90, time: Date()), member: benID)
+        try await wait("all of it is logged") {
+            let kinds = Set(ana.logs.entries(of: mission).map(\.kind))
+            return kinds.isSuperset(of: [.order, .orderAnswer, .note, .position])
+        }
+        let later = ana.logs.entries(of: mission)
+        XCTAssertEqual(later.first { $0.kind == .order }?.text, "Hold position: By the gate, to Ben")
+        XCTAssertEqual(later.first { $0.kind == .orderAnswer }?.text, "Done")
+        XCTAssertEqual(later.first { $0.kind == .note }?.text, "At the gate")
+        XCTAssertTrue(later.contains { $0.kind == .position && $0.member == benID && $0.heading == 90 && $0.name == "Ben" })
+
+        // The log outlives the squad, can be exported whole, and can be deleted.
+        ana.endSquad()
+        XCTAssertEqual(ana.logs.entries(of: mission).last?.kind, .squadEnded)
+        XCTAssertNotNil(ana.logs.missions().first { $0.id == mission }?.ended)
+        let zip = try XCTUnwrap(ana.logs.export(mission))
+        XCTAssertGreaterThan((try FileManager.default.attributesOfItem(atPath: zip.path)[.size] as? Int) ?? 0, 1000)
+        ana.logs.delete(mission)
+        XCTAssertTrue(ana.logs.missions().isEmpty)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: clipFile.path))
+    }
+
+    /// What an encoder gave, collected from its own queue.
+    final class Frames: @unchecked Sendable {
+        private let lock = NSLock()
+        private var items: [(isKey: Bool, data: Data)] = []
+        func add(_ isKey: Bool, _ data: Data) { lock.lock(); items.append((isKey, data)); lock.unlock() }
+        var all: [(isKey: Bool, data: Data)] { lock.lock(); defer { lock.unlock() }; return items }
+    }
+
+    func testPicturesSurviveTheEncoderAndTheWire() async throws {
+        // Made-up pictures, through H.264, into the frames a phone sends, and back to something a screen can show.
+        let source = PatternSource()
+        let got = Frames()
+        let encoder = try XCTUnwrap(H264Encoder(width: source.width, height: source.height, kbps: 300) { got.add($0, $1) })
+        for _ in 0..<12 { encoder.encode(try XCTUnwrap(source.picture())) }
+        try await wait("the encoder's output") { got.all.count >= 12 }
+        encoder.stop()
+
+        let frames = got.all
+        XCTAssertTrue(frames[0].isKey, "the first picture can be shown on its own")
+        XCTAssertEqual(frames[0].data.prefix(4), H264Encoder.startCode)
+        XCTAssertEqual(H264Display.units(frames[0].data).map { $0[0] & 0x1F }.prefix(2), [7, 8], "a key frame leads with its parameter sets")
+        XCTAssertFalse(frames[1].isKey)
+        let bytes = frames.reduce(0) { $0 + $1.data.count }
+        XCTAssertLessThan(bytes, 150_000, "twelve small pictures at this bit rate are tens of kilobytes, not hundreds")
+
+        let stream = UUID()
+        let display = H264Display()
+        var shown = 0
+        for (n, frame) in frames.enumerated() {
+            let sent = VideoMission.Frame(stream: stream, count: UInt32(n), isKey: frame.isKey, data: frame.data)
+            let arrived = try XCTUnwrap(VideoMission.Frame(payload: sent.payload))
+            shown += display.samples(arrived.data).count
+        }
+        XCTAssertEqual(shown, 12)
+
+        // A viewer who missed the key frame shows nothing until the next one.
+        let late = H264Display()
+        XCTAssertTrue(late.samples(frames[1].data).isEmpty)
+        XCTAssertEqual(late.samples(frames[0].data).count, 1)
+        XCTAssertEqual(late.samples(frames[1].data).count, 1)
     }
 
     func testALeaderPicksUpItsSquadAfterARestart() async throws {
