@@ -21,7 +21,7 @@ struct SquadView: View {
     /// the screen. Kept across launches.
     @AppStorage("showsList") private var showsList = true
 
-    enum MemberTab { case map, orders, notes }
+    enum MemberTab { case map, team, orders, notes }
 
     private var leading: Bool { model.role == .leader }
     private var squadName: String { model.squad?.name ?? "this squad" }
@@ -93,14 +93,9 @@ struct SquadView: View {
                 if let shown = model.newOrder ?? model.queue.first {
                     NextOrderLine(order: shown, isNew: model.newOrder != nil, waiting: model.queue.count) { memberTab = .orders }
                 }
+                // The map has the screen; the team is on its own tab.
                 TimelineView(.periodic(from: .now, by: 15)) { context in
-                    VStack(spacing: 0) {
-                        map(now: context.date)
-                        if showsList {
-                            MemberList(now: context.date)
-                                .frame(maxHeight: wide ? 360 : 240)
-                        }
-                    }
+                    map(now: context.date)
                 }
             }
             .onAppear {
@@ -108,6 +103,12 @@ struct SquadView: View {
             }
             .tabItem { Label("Map", systemImage: "map") }
             .tag(MemberTab.map)
+
+            TimelineView(.periodic(from: .now, by: 15)) { context in
+                MemberList(now: context.date)
+            }
+            .tabItem { Label("Team", systemImage: "person.3") }
+            .tag(MemberTab.team)
 
             MemberOrdersView()
                 .tabItem { Label("Orders", systemImage: "flag") }
@@ -166,8 +167,11 @@ struct SquadView: View {
             }
             .overlay(alignment: .bottomTrailing) {
                 VStack(spacing: 10) {
-                    Button(showsList ? "Hide the list" : "Show the list", systemImage: showsList ? "rectangle.expand.vertical" : "list.bullet") {
-                        withAnimation { showsList.toggle() }
+                    // Only the leader's device has a panel to put away.
+                    if leading {
+                        Button(showsList ? "Hide the panel" : "Show the panel", systemImage: showsList ? "rectangle.expand.vertical" : "list.bullet") {
+                            withAnimation { showsList.toggle() }
+                        }
                     }
                     Button("Show everyone", systemImage: "scope") { recenter += 1 }
                 }
