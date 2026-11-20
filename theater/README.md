@@ -22,9 +22,9 @@ The host discovers leaders with Bonjour and uses SquadLink's authenticated, encr
 | `notes` | Read-only field notes |
 | `zones` | Definitions and confirmed goal arrivals / allowed-area departures |
 | `video` | Stream metadata and an explicit leader-only notice; no camera frames |
-| `wall` | Map with orders and latest notes |
+| `dashboard` | Map with orders and latest notes |
 
-Open the links in separate windows. Reloading keeps the selected squad and view. Several squads can be watched at once (up to 16); each keeps its own link and state. Browser updates use SSE, with reconnects and a visible disconnected state. Last known positions remain visible when a link drops and fade when stale. Rejoining replays the leader's current state, latest 100 orders and latest 50 notes; it is not a mission-log archive.
+Open the links in separate windows. Reloading keeps the selected squad and view. Existing `/wall` links also open Dashboard. Several squads can be watched at once (up to 16); each keeps its own link and state. Browser updates use SSE, with reconnects and a visible disconnected state. Last known positions remain visible when a link drops and fade when stale. Rejoining replays the leader's current state, latest 100 orders and latest 50 notes; it is not a mission-log archive.
 
 The host exposes no API for orders, answers, notes, position reports, zone edits or video commands. Pairing and forgetting a watched squad are host-local administrative actions.
 

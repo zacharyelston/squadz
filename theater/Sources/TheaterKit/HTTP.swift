@@ -231,7 +231,7 @@ public final class TheaterHTTPServer {
     private func isPage(_ path: String) -> Bool {
         if path == "/" { return true }
         let parts = path.split(separator: "/")
-        return parts.count == 3 && parts[0] == "squads" && UUID(uuidString: String(parts[1])) != nil && ["map", "team", "orders", "notes", "zones", "video", "wall"].contains(String(parts[2]))
+        return parts.count == 3 && parts[0] == "squads" && UUID(uuidString: String(parts[1])) != nil && ["map", "team", "orders", "notes", "zones", "video", "dashboard", "wall"].contains(String(parts[2]))
     }
     private func resource(_ file: String, id: UUID) {
         guard let url = Bundle.module.url(forResource: file, withExtension: nil, subdirectory: "Web"), let data = try? Data(contentsOf: url) else { respond(id, 404, "Not found", Data()); return }

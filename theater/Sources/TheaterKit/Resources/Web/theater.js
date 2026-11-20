@@ -10,7 +10,7 @@
     ["notes", "Notes", "☷"],
     ["zones", "Zones", "◌"],
     ["video", "Video", "▣"],
-    ["wall", "Wall", "▤"],
+    ["dashboard", "Dashboard", "▤"],
   ];
   let inviteDraft = "";
   let snapshot = { squads: [], nearby: [] },
@@ -44,7 +44,10 @@
   };
   const route = () => {
     const parts = location.pathname.split("/").filter(Boolean);
-    return { id: parts[1], view: parts[2] || "wall" };
+    return {
+      id: parts[1],
+      view: parts[2] === "wall" ? "dashboard" : parts[2] || "dashboard",
+    };
   };
   const path = (id, view) => "/squads/" + encodeURIComponent(id) + "/" + view;
   const names = (s, id) =>
@@ -217,7 +220,7 @@
         ),
       );
       const a = el("a", "open-squad", s.name);
-      a.href = path(s.id, "wall");
+      a.href = path(s.id, "dashboard");
       card.append(
         a,
         el(
@@ -230,7 +233,7 @@
         ),
       );
       const links = el("div", "quick-views");
-      for (const v of ["map", "orders", "wall"]) {
+      for (const v of ["map", "orders", "dashboard"]) {
         const a = el("a", "", v[0].toUpperCase() + v.slice(1));
         a.href = path(s.id, v);
         links.append(a);
@@ -588,7 +591,11 @@
     navigation(s, r.view);
     document.title =
       s.name + " · " + (views.find((v) => v[0] === r.view)?.[1] || "Theater");
-    if (mapView && lastSquad === s.id && ["map", "wall"].includes(r.view)) {
+    if (
+      mapView &&
+      lastSquad === s.id &&
+      ["map", "dashboard"].includes(r.view)
+    ) {
       mapView.update(s, snapshot);
       const old = document.getElementById("squad-problem");
       if (s.problem) {
@@ -606,7 +613,7 @@
         status.className =
           "badge " + (s.connection === "connected" ? "" : "warning");
       }
-      if (r.view === "wall") fillWall(s);
+      if (r.view === "dashboard") fillWall(s);
       return;
     }
     mapView?.destroy();
@@ -620,11 +627,11 @@
       warning.id = "squad-problem";
       main.append(warning);
     }
-    if (r.view === "map" || r.view === "wall") {
-      const grid = el("div", r.view === "wall" ? "wall-grid" : ""),
+    if (r.view === "map" || r.view === "dashboard") {
+      const grid = el("div", r.view === "dashboard" ? "wall-grid" : ""),
         holder = el("div", "map-panel");
       grid.append(holder);
-      if (r.view === "wall") {
+      if (r.view === "dashboard") {
         const strip = el("aside", "wall-strip");
         strip.id = "wall-strip";
         strip.setAttribute("aria-label", "Orders and notes");
@@ -632,7 +639,7 @@
       }
       main.append(grid);
       mapView = new SquadMap(holder, s, snapshot);
-      if (r.view === "wall") fillWall(s);
+      if (r.view === "dashboard") fillWall(s);
     } else
       main.append(
         r.view === "team"

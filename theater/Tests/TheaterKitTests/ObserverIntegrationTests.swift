@@ -113,7 +113,7 @@ final class ObserverIntegrationTests: XCTestCase {
         defer { server.stop(); controller.stop(); room.stop() }
         try server.start(); try await wait("HTTP listener") { server.port != 0 }
         let base = "http://127.0.0.1:\(server.port)"
-        for path in ["/", "/squads/\(room.core.squadID.raw)/map", "/squads/\(room.core.squadID.raw)/wall", "/theater.js", "/theater.css", "/api/state"] {
+        for path in ["/", "/squads/\(room.core.squadID.raw)/map", "/squads/\(room.core.squadID.raw)/dashboard", "/squads/\(room.core.squadID.raw)/wall", "/theater.js", "/theater.css", "/api/state"] {
             let (data, response) = try await URLSession.shared.data(from: URL(string: base + path)!)
             XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 200, path); XCTAssertFalse(data.isEmpty)
         }
