@@ -1,6 +1,8 @@
 import CoreGeo
 import MapKit
 import SquadKit
+import ZoneKit
+import ZoneMapKit
 import SwiftUI
 
 /// The squad on a MapKit map. The map itself is Apple's, which needs the internet for places
@@ -14,6 +16,9 @@ struct SquadMap: UIViewRepresentable {
     var heading: Double?
     /// Places to mark: orders that are still open, and the one being written.
     var places: [Place] = []
+    var zones: [SquadZone] = []
+    var draftZone: SquadZone?
+    var draftPoints: [GeoPoint] = []
     /// While set, a tap on the map picks a place instead of doing what a tap usually does.
     var onPick: ((GeoPoint) -> Void)?
 
@@ -45,6 +50,7 @@ struct SquadMap: UIViewRepresentable {
         let c = context.coordinator
         c.onPick = onPick
         c.heading = heading
+        let zonesChanged = c.updateZones(zones, draft: draftZone, points: draftPoints, on: map)
         var marked = Set<UUID>()
         for place in places {
             marked.insert(place.id)
@@ -93,15 +99,15 @@ struct SquadMap: UIViewRepresentable {
         }
 
         // Frame everyone when someone new shows up, and on request.
-        let everything = c.pins.values.map(\.coordinate) + c.places.values.filter { !$0.isDraft }.map(\.coordinate)
-        if !everything.isEmpty, c.framed != c.pins.count || c.recenter != recenter || outOfView {
+        let everything = c.pins.values.map(\.coordinate) + c.places.values.filter { !$0.isDraft }.map(\.coordinate) + c.zonePins.values.map(\.coordinate)
+        if !everything.isEmpty, c.framed != c.pins.count || c.recenter != recenter || outOfView || zonesChanged {
             let asked = c.recenter != recenter || outOfView
             c.framed = c.pins.count
-            if everything.count == 1, let only = everything.first {
+            if everything.count == 1, c.zoneRect.isNull, let only = everything.first {
                 map.setRegion(MKCoordinateRegion(center: only, latitudinalMeters: 1500, longitudinalMeters: 1500), animated: asked)
             } else {
                 // Room around the outermost pins and flags for their markers and names.
-                let rect = everything.reduce(MKMapRect.null) {
+                let rect = everything.reduce(c.zoneRect) {
                     $0.union(MKMapRect(origin: MKMapPoint($1), size: MKMapSize(width: 0, height: 0)))
                 }
                 map.setVisibleMapRect(rect, edgePadding: UIEdgeInsets(top: 80, left: 60, bottom: 60, right: 60), animated: asked)
@@ -126,7 +132,70 @@ struct SquadMap: UIViewRepresentable {
         init(id: UUID) { self.id = id }
     }
 
+    final class ZonePin: MKPointAnnotation {
+        var color: UIColor = .systemGreen
+    }
+
     final class Coordinator: NSObject, MKMapViewDelegate {
+        var zonePins: [UUID: ZonePin] = [:]
+        var zoneRect = MKMapRect.null
+        private var drawnZones: [SquadZone] = []
+        private var drawnDraft: SquadZone?
+        private var drawnPoints: [GeoPoint] = []
+        private var zoneOverlays: [any MKOverlay] = []
+        private var overlayStyles: [ObjectIdentifier: (UIColor, Bool)] = [:]
+
+        func updateZones(_ zones: [SquadZone], draft: SquadZone?, points: [GeoPoint], on map: MKMapView) -> Bool {
+            guard zones != drawnZones || draft != drawnDraft || points != drawnPoints else { return false }
+            let changed = zones != drawnZones
+            drawnZones = zones; drawnDraft = draft; drawnPoints = points
+            map.removeOverlays(zoneOverlays)
+            map.removeAnnotations(Array(zonePins.values))
+            zoneOverlays = []; overlayStyles = [:]; zonePins = [:]; zoneRect = .null
+            let visible = zones.filter { $0.id != draft?.id } + (draft.map { [$0] } ?? [])
+            for zone in visible {
+                let isDraft = zone.id == draft?.id
+                let color: UIColor = isDraft ? .systemPurple : zone.rule == .goal ? .systemGreen : .systemOrange
+                let overlay = zone.shape.mapOverlay()
+                if let overlay {
+                    overlayStyles[ObjectIdentifier(overlay as AnyObject)] = (color, zone.rule == .allowedArea || isDraft)
+                    zoneOverlays.append(overlay)
+                    if !isDraft { zoneRect = zoneRect.union(overlay.boundingMapRect) }
+                }
+                if case .polygon(let vertices) = zone.shape, vertices.isEmpty { continue }
+                let pin = ZonePin()
+                pin.coordinate = zone.shape.labelPoint.coordinate
+                pin.title = zone.name.isEmpty ? "New zone" : zone.name
+                pin.subtitle = zone.rule.title
+                pin.color = color
+                zonePins[zone.id] = pin
+                map.addAnnotation(pin)
+            }
+            // Keep unfinished polygons and their corners visible while drawing.
+            for (index, point) in points.enumerated() {
+                let pin = ZonePin(); pin.coordinate = point.coordinate; pin.title = "Corner \(index + 1)"; pin.color = .systemPurple
+                map.addAnnotation(pin)
+                // Separate keys for vertices so the zone's own label remains visible.
+                zonePins[UUID()] = pin
+            }
+            map.addOverlays(zoneOverlays, level: .aboveRoads)
+            return changed
+        }
+
+        func mapView(_ mapView: MKMapView, rendererFor overlay: any MKOverlay) -> MKOverlayRenderer {
+            let renderer: MKOverlayPathRenderer
+            if let circle = overlay as? MKCircle { renderer = MKCircleRenderer(circle: circle) }
+            else if let polygon = overlay as? MKPolygon { renderer = MKPolygonRenderer(polygon: polygon) }
+            else if let line = overlay as? MKPolyline { renderer = MKPolylineRenderer(polyline: line) }
+            else { return MKOverlayRenderer(overlay: overlay) }
+            let (color, dashed) = overlayStyles[ObjectIdentifier(overlay as AnyObject)] ?? (.systemPurple, true)
+            renderer.strokeColor = color
+            renderer.fillColor = color.withAlphaComponent(0.12)
+            renderer.lineWidth = 2
+            if dashed { renderer.lineDashPattern = [6, 4] }
+            return renderer
+        }
+
         var pins: [MemberID: MemberPin] = [:]
         var places: [UUID: PlacePin] = [:]
         /// The orders' flags on the map at the last update, to tell a new one.
@@ -192,6 +261,15 @@ struct SquadMap: UIViewRepresentable {
         }
 
         func mapView(_ mapView: MKMapView, viewFor annotation: any MKAnnotation) -> MKAnnotationView? {
+            if let zone = annotation as? ZonePin {
+                let view = MKMarkerAnnotationView(annotation: zone, reuseIdentifier: nil)
+                view.markerTintColor = zone.color
+                view.glyphImage = UIImage(systemName: "scope")
+                view.titleVisibility = .visible
+                view.displayPriority = .required
+                view.canShowCallout = true
+                return view
+            }
             if let place = annotation as? PlacePin {
                 let view = mapView.dequeueReusableAnnotationView(withIdentifier: "place", for: place) as! MKMarkerAnnotationView
                 Self.style(view, place)
@@ -203,4 +281,8 @@ struct SquadMap: UIViewRepresentable {
             return view
         }
     }
+}
+
+private extension GeoPoint {
+    var coordinate: CLLocationCoordinate2D { CLLocationCoordinate2D(latitude: latitude, longitude: longitude) }
 }

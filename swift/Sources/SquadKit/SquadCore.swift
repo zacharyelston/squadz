@@ -1,5 +1,6 @@
 import Foundation
 import CoreGeo
+import ZoneKit
 
 /// The leader's device: the squad core running one mission. The core does what every squad
 /// needs: join and rejoin, the roster, positions, orders, notes, check fire, observers and the
@@ -69,6 +70,9 @@ public struct SquadCore<M: Mission> {
     public private(set) var cancelled: Set<UUID> = []
     /// What the squad was told, oldest first: members leaving or being removed.
     public private(set) var notices: [Notice] = []
+    public private(set) var zones: [SquadZone] = []
+    public private(set) var zoneEvents: [ZoneEvent] = []
+    private var zoneMonitor = ZoneTracker<MemberID>()
     static var maxNoticesKept: Int { 50 }
     static var maxOrdersKept: Int { 100 }
     static var maxNotesKept: Int { 100 }
@@ -82,7 +86,7 @@ public struct SquadCore<M: Mission> {
     /// saved it.
     public init(squad: Squad, mission: M, keys: LeaderKeys = LeaderKeys(), credentials: [CredentialRecord] = [],
                 epoch: Int = 0, keyChanges: [LeaderKeyChange] = [], revision: Int = 0, sharesPositions: Bool = false,
-                sharesNotes: Bool = false) {
+                sharesNotes: Bool = false, zones: [SquadZone] = [], zoneEvents: [ZoneEvent] = []) {
         self.sharesPositions = sharesPositions
         self.sharesNotes = sharesNotes
         self.squad = squad
@@ -92,6 +96,8 @@ public struct SquadCore<M: Mission> {
         self.epoch = epoch
         self.keyChanges = keyChanges
         self.revision = revision
+        self.zones = Array(zones.filter { $0.validationError == nil }.prefix(32))
+        self.zoneEvents = Array(zoneEvents.suffix(50))
     }
 
     public var squadID: SquadID { squad.id }
@@ -186,6 +192,7 @@ public struct SquadCore<M: Mission> {
 
         switch message.body {
         case .bye:
+            zoneMonitor.reset(member: member)
             peers[peer] = nil
             return []
         case .leave:
@@ -194,7 +201,7 @@ public struct SquadCore<M: Mission> {
         case var .position(p):
             p.member = member
             positions[member] = p
-            return report(p, except: peer)
+            return report(p, except: peer) + evaluateZones(p, member: member, now: now)
         case var .note(n):
             n.author = squad.members.first { $0.id == member }?.name ?? n.author
             guard !notes.contains(where: { $0.id == n.id }) else { return [] }   // sent twice
@@ -287,6 +294,7 @@ public struct SquadCore<M: Mission> {
         observers.remove(peer)
         peers = peers.filter { $0.value != id }   // a rejoin replaces the old link
         peers[peer] = id
+        zoneMonitor.reset(member: id)
         // Orders for this member that it hasn't finished, so a rejoin (or a late joiner) has them.
         let open = orders.filter { $0.isFor(id) && !cancelled.contains($0.id) && acks[$0.id]?[id] != .done && acks[$0.id]?[id] != .cannot }.suffix(10)
         let known = sharesPositions ? positions.values.filter { $0.member != id }.sorted { $0.time < $1.time } : []
@@ -301,6 +309,7 @@ public struct SquadCore<M: Mission> {
 
     /// A link went away without a bye (the transport noticed).
     public mutating func peerClosed(_ peer: PeerID) {
+        if let member = peers[peer] { zoneMonitor.reset(member: member) }
         peers[peer] = nil
         observers.remove(peer)
         links[peer] = nil
@@ -327,6 +336,7 @@ public struct SquadCore<M: Mission> {
         let closing = revoke(ids)
         squad.members.removeAll { $0.id == member }
         positions[member] = nil
+        zoneMonitor.reset(member: member)
         notices.append(notice)
         if notices.count > Self.maxNoticesKept { notices.removeFirst(notices.count - Self.maxNoticesKept) }
         let told = (Array(peers.keys) + Array(observers)).sorted { $0.raw < $1.raw }.map { Outgoing(to: $0, .notice(notice)) }
@@ -364,6 +374,9 @@ public struct SquadCore<M: Mission> {
         credentials = []
         squad.members = []
         positions = [:]
+        zones = []
+        zoneEvents = []
+        zoneMonitor = ZoneTracker<MemberID>()
         peers = [:]
         observers = []
         links = [:]
@@ -384,12 +397,42 @@ public struct SquadCore<M: Mission> {
 
     /// The leader's own position, shared with observers like a member's. The leader's device is
     /// on the roster only if the app puts it there.
-    public mutating func setPosition(_ position: MemberPosition, of member: MemberID) -> [Outgoing] {
+    public mutating func setPosition(_ position: MemberPosition, of member: MemberID, now: Date = .now) -> [Outgoing] {
         guard squad.members.contains(where: { $0.id == member }) else { return [] }
         var p = position
         p.member = member
         positions[member] = p
-        return report(p, except: nil)
+        return report(p, except: nil) + evaluateZones(p, member: member, now: now)
+    }
+
+    /// Only a leader action can define zones. Old clients ignore the optional status fields.
+    public mutating func setZones(_ new: [SquadZone], now: Date) -> [Outgoing] {
+        guard new.count <= 32, Set(new.map(\.id)).count == new.count else { return problem("Keep at most 32 unique zones.") }
+        let roster = Set(squad.members.map(\.id))
+        for zone in new {
+            if let error = zone.validationError { return problem(error) }
+            let existingTargets = Set(zones.first(where: { $0.id == zone.id })?.members ?? [])
+            if let members = zone.members, !Set(members).isSubset(of: roster.union(existingTargets)) { return problem("Choose members still in the squad.") }
+        }
+        for zone in new where zones.first(where: { $0.id == zone.id }) != zone { zoneMonitor.reset(zone: zone.id) }
+        zones = new
+        zoneMonitor.retain(zones: Set(new.map(\.id)))
+        return changed(now: now)
+    }
+
+    private mutating func evaluateZones(_ position: MemberPosition, member id: MemberID, now: Date) -> [Outgoing] {
+        guard let member = squad.members.first(where: { $0.id == id }) else { return [] }
+        let applicable = zones.filter { $0.includes(id) }
+        let crossings = zoneMonitor.observe(ZoneFix(at: position.at, accuracy: position.accuracy, time: position.time),
+                                            subject: id, zones: applicable.map(\.definition), now: now)
+        let events = crossings.compactMap { crossing -> ZoneEvent? in
+            guard let zone = applicable.first(where: { $0.id == crossing.zone }) else { return nil }
+            return ZoneEvent(zone: zone, member: member, kind: crossing.kind, time: crossing.time)
+        }
+        guard !events.isEmpty else { return [] }
+        zoneEvents.append(contentsOf: events)
+        zoneEvents = Array(zoneEvents.suffix(50))
+        return changed(now: now)
     }
 
     /// A new position, to everyone who sees positions except the link it came from.
@@ -511,6 +554,6 @@ public struct SquadCore<M: Mission> {
         let section = mission.status(core: core, now: now).map { MissionStatus(id: M.id, version: M.version, payload: $0) }
         return SquadStatus(revision: revision, squad: squad,
                            holds: holds(now: now).sorted { ($0.source, $0.kind, $0.text) < ($1.source, $1.kind, $1.text) },
-                           missions: section.map { [$0] } ?? [], reportEvery: reportEvery)
+                           missions: section.map { [$0] } ?? [], reportEvery: reportEvery, zones: zones, zoneEvents: zoneEvents)
     }
 }

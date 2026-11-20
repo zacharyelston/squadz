@@ -12,15 +12,14 @@ let package = Package(
     name: "SquadKit",
     platforms: [.iOS(.v17), .macOS(.v14)],
     products: [
-        .library(name: "CoreGeo", targets: ["CoreGeo"]),
         .library(name: "SquadKit", targets: ["SquadKit"]),
         .library(name: "SquadLink", targets: ["SquadLink"]),
     ],
+    dependencies: [.package(path: "../../BackyardBallistics/Packages/GeoZones")],
     targets: [
-        .target(name: "CoreGeo"),
-        .target(name: "SquadKit", dependencies: ["CoreGeo"]),
+        .target(name: "SquadKit", dependencies: [.product(name: "CoreGeo", package: "GeoZones"), .product(name: "ZoneKit", package: "GeoZones")]),
         .target(name: "SquadLink", dependencies: ["SquadKit"]),
-        .testTarget(name: "SquadKitTests", dependencies: ["SquadKit", "CoreGeo"]),
-        .testTarget(name: "SquadLinkTests", dependencies: ["SquadLink", "SquadKit", "CoreGeo"]),
+        .testTarget(name: "SquadKitTests", dependencies: ["SquadKit", .product(name: "CoreGeo", package: "GeoZones")]),
+        .testTarget(name: "SquadLinkTests", dependencies: ["SquadLink", "SquadKit", .product(name: "CoreGeo", package: "GeoZones")]),
     ]
 )

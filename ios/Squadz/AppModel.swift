@@ -41,6 +41,8 @@ struct LeaderSaved: Codable, Equatable {
     var revision: Int
     /// The relay this squad was started with, if any.
     var relay: RelayAddress?
+    var zones: [SquadZone]? = nil
+    var zoneEvents: [ZoneEvent]? = nil
 }
 
 /// The whole app: this phone either leads one squad, is a member of one, or is in none.
@@ -88,6 +90,12 @@ final class AppModel {
     private(set) var myAnswers: [UUID: OrderAck.Response] = [:]
     /// Orders the leader took back.
     private(set) var cancelledOrders: Set<UUID> = []
+
+    private(set) var zones: [SquadZone] = []
+    private(set) var zoneEvents: [ZoneEvent] = []
+    private(set) var zoneAlert: ZoneEvent?
+    private var seenZoneEvents: Set<UUID> = []
+    private var receivedZoneSnapshot = false
 
     let device: UUID
     private let defaults: UserDefaults
@@ -167,7 +175,7 @@ final class AppModel {
         guard role == .none else { return }
         if let saved = loadLeader(), let keys = try? keychain.leaderKeys(for: saved.squad.id) {
             lead(SquadCore(squad: saved.squad, mission: NoMission(), keys: keys, credentials: saved.credentials,
-                           epoch: saved.epoch, keyChanges: saved.keyChanges, revision: saved.revision, sharesPositions: true, sharesNotes: true),
+                           epoch: saved.epoch, keyChanges: saved.keyChanges, revision: saved.revision, sharesPositions: true, sharesNotes: true, zones: saved.zones ?? [], zoneEvents: saved.zoneEvents ?? []),
                  me: saved.me, relay: saved.relay)
         } else if let id = defaults.string(forKey: "memberSquad").flatMap(UUID.init(uuidString:)),
                   let credential = try? keychain.credential(for: SquadID(id)) {
@@ -232,6 +240,7 @@ final class AppModel {
                 return
             }
             self.core = core
+            seenZoneEvents = Set(core.zoneEvents.map(\.id))
             self.host = host
             self.me = me
             leaderID = me
@@ -318,6 +327,7 @@ final class AppModel {
         answers = core.acks
         notes = core.notes
         cancelledOrders = core.cancelled
+        receiveZones(core.zones, events: core.zoneEvents, announce: true)
         refreshLinks()
         if let latest = core.notices.last {
             tell(latest)
@@ -363,6 +373,51 @@ final class AppModel {
         guard rate != reportEvery else { return }
         reportEvery = rate
         if ticker != nil { startReporting() }
+    }
+
+    // MARK: Zones
+
+    @discardableResult
+    func saveZone(_ zone: SquadZone) -> Bool {
+        guard role == .leader else { return false }
+        if let error = zone.validationError { alert = error; return false }
+        var next = zones.filter { $0.id != zone.id }
+        next.append(zone)
+        updateLeader { $0.setZones(next, now: .now) }
+        if zones != next { alert = core?.lastProblem ?? "The zone could not be saved."; return false }
+        return true
+    }
+
+    func deleteZone(_ zone: SquadZone) {
+        guard role == .leader else { return }
+        updateLeader { $0.setZones(zones.filter { $0.id != zone.id }, now: .now) }
+    }
+
+    func enableZoneNotifications() async {
+        do {
+            let enabled = try await ZoneNotifications.shared.enable()
+            if !enabled {
+                alert = "Notification banners are off. You can enable them for Squadz in Settings. Zone activity remains available in the app."
+            }
+        } catch { alert = "Could not enable notifications: \(error.localizedDescription)" }
+    }
+
+    private func receiveZones(_ zones: [SquadZone], events: [ZoneEvent], announce: Bool) {
+        self.zones = zones
+        zoneEvents = events
+        let new = events.filter { !seenZoneEvents.contains($0.id) }
+        seenZoneEvents.formUnion(events.map(\.id))
+        // Retain only the bounded snapshot; old IDs cannot be broadcast again by the core.
+        seenZoneEvents.formIntersection(Set(events.map(\.id)))
+        guard announce else { return }
+        for event in new where (role == .leader || event.member == me) && abs(event.time.timeIntervalSinceNow) <= 120 {
+            zoneAlert = event
+            ZoneNotifications.shared.post(event)
+            Task { [weak self] in
+                try? await Task.sleep(for: .seconds(15))
+                if self?.zoneAlert?.id == event.id { self?.zoneAlert = nil }
+            }
+        }
     }
 
     // MARK: Field notes
@@ -519,7 +574,7 @@ final class AppModel {
 
     private func saveLeader(_ core: SquadCore<NoMission>, me: MemberID, relay: RelayAddress?) throws {
         let saved = LeaderSaved(squad: core.squad, me: me, credentials: core.credentials, epoch: core.epoch,
-                                keyChanges: core.keyChanges, revision: core.revision, relay: relay)
+                                keyChanges: core.keyChanges, revision: core.revision, relay: relay, zones: core.zones, zoneEvents: core.zoneEvents)
         guard saved != lastSaved else { return }
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         try JSONEncoder().encode(saved).write(to: leaderFile, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
@@ -608,6 +663,8 @@ final class AppModel {
         case let .status(s):
             show(s.squad)
             follow(s.reportEvery)
+            receiveZones(s.zones ?? [], events: s.zoneEvents ?? [], announce: receivedZoneSnapshot)
+            receivedZoneSnapshot = true
         case let .positions(report):
             for p in report.positions { if let m = p.member { positions[m] = p } }
         case let .notice(n):
@@ -687,6 +744,11 @@ final class AppModel {
 
     private func clear() {
         notice = nil
+        zones = []
+        zoneEvents = []
+        zoneAlert = nil
+        seenZoneEvents = []
+        receivedZoneSnapshot = false
         orders = []
         answers = [:]
         myAnswers = [:]

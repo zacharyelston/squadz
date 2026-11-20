@@ -331,12 +331,17 @@ public struct SquadStatus: Codable, Equatable, Sendable {
     /// How often the leader wants each device to send its position, in seconds. Absent means
     /// the device's own default.
     public var reportEvery: Int?
-    public init(revision: Int, squad: Squad, holds: [Hold], missions: [MissionStatus] = [], reportEvery: Int? = nil) {
+    /// Optional for older clients; zone-capable leaders always send an array, even when empty.
+    public var zones: [SquadZone]?
+    public var zoneEvents: [ZoneEvent]?
+    public init(revision: Int, squad: Squad, holds: [Hold], missions: [MissionStatus] = [], reportEvery: Int? = nil, zones: [SquadZone]? = nil, zoneEvents: [ZoneEvent]? = nil) {
         self.revision = revision
         self.squad = squad
         self.holds = holds
         self.missions = missions
         self.reportEvery = reportEvery
+        self.zones = zones
+        self.zoneEvents = zoneEvents
     }
 
     /// The fastest and slowest a leader may ask for, in seconds.

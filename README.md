@@ -126,3 +126,9 @@ cd ios && xcodegen generate && xcodebuild -project Squadz.xcodeproj -scheme Squa
 ```
 
 The Swift tests that go through a relay start the one just built, and are skipped if it isn't there. As of this writing: 13 relay tests, 68 package tests and 8 app tests.
+
+## Shared geometry and zones
+
+Check out `BackyardBallistics` next to this repository. `BackyardBallistics/Packages/GeoZones` is the shared Swift package used by both apps: CoreGeo (the existing geometry), ZoneKit (circles, polygons and confirmed boundary crossings), and ZoneMapKit (map drawing). Squadz no longer keeps a second CoreGeo implementation.
+
+The commander can add, label, edit and delete circles or polygons in **Zones**, choose which members they cover, and select goal-arrival or allowed-area-departure alerts. Zone definitions and the latest 50 events are saved with the squad. Enable notification banners from Zones for system alerts. Live monitoring currently requires the squad apps to be open and connected; missing GPS or a disconnected member does not imply a departure.
