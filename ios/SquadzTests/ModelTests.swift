@@ -1,3 +1,4 @@
+import AVFoundation
 import CoreLocation
 import CoreGeo
 import Network
@@ -318,12 +319,74 @@ final class ModelTests: XCTestCase {
         try await Task.sleep(for: .milliseconds(600))
         XCTAssertEqual(ana.display.shown, shown, "no more pictures after the stop")
 
-        // Ben starts again and stops it himself.
+        // Ben starts again. Nothing is kept until the leader says, and then everyone can see that it is.
         ben.startStreaming()
-        try await wait("streaming again") { ana.streams.count == 1 && ana.display.shown > shown }
+        try await wait("streaming again") { ana.streams.count == 1 && ana.display.shown > shown + 3 }
+        let mission = try XCTUnwrap(ana.missionID)
+        XCTAssertNil(ben.missionID, "a member's phone keeps no log")
+        XCTAssertFalse(ana.logs.entries(of: mission).contains { $0.isMedia })
+        XCTAssertEqual(ben.streamingNote, "You are streaming to the leader")
+
+        ana.startRecording()
+        XCTAssertTrue(ana.isRecording)
+        try await wait("Ben and Cy see the recording") { ben.streams.first?.recording == true && cy.streams.first?.recording == true }
+        XCTAssertEqual(ben.streamingNote, "You are streaming to the leader, and being recorded")
+        XCTAssertTrue(ana.snap())
+        try await wait("Ben sees a still was kept") { ben.streams.first?.stills == 1 }
+        XCTAssertEqual(ben.streamingNote, "You are streaming to the leader, and being recorded · 1 still kept")
+        try await Task.sleep(for: .seconds(3))   // long enough to span a key frame
+
+        // Ben stops: the clip is closed and filed in the mission's log, with the still.
         ben.stopStreaming()
         try await wait("stopped by Ben") { ana.streams.isEmpty }
+        try await wait("the clip is in the log") { ana.logs.entries(of: mission).contains { $0.kind == .clip } }
+        XCTAssertFalse(ana.isRecording)
+        let log = ana.logs.entries(of: mission)
+        let clip = try XCTUnwrap(log.first { $0.kind == .clip })
+        let still = try XCTUnwrap(log.first { $0.kind == .still })
+        XCTAssertEqual(clip.member, benID)
+        XCTAssertEqual(clip.name, "Ben")
+        XCTAssertGreaterThan(try XCTUnwrap(clip.seconds), 0.5)
+        let clipFile = ana.logs.media(mission, try XCTUnwrap(clip.file))
+        let stillFile = ana.logs.media(mission, try XCTUnwrap(still.file))
+        XCTAssertGreaterThan((try FileManager.default.attributesOfItem(atPath: clipFile.path)[.size] as? Int) ?? 0, 1000)
+        let played = try await AVURLAsset(url: clipFile).load(.duration).seconds
+        XCTAssertGreaterThan(played, 0.5, "the clip plays")
+        let picture = try XCTUnwrap(UIImage(contentsOfFile: stillFile.path))
+        XCTAssertEqual(picture.size.width, 320)
+
+        // The log has the rest of what happened, in order, and reads on its own.
+        XCTAssertEqual(log.first?.kind, .squadStarted)
+        XCTAssertEqual(log.filter { $0.kind == .joined }.compactMap(\.name).sorted(), ["Ben", "Cy"])
+        XCTAssertEqual(log.filter { $0.kind == .streamStarted }.count, 2)
+        XCTAssertEqual(log.filter { $0.kind == .streamStopped }.count, 2)
+        XCTAssertTrue(MissionLogView.summary(log).hasSuffix("1 clip · 1 still"), MissionLogView.summary(log))
+
+        // Orders, answers, notes and positions go in too.
+        XCTAssertTrue(ana.sendOrder(.holdPosition, text: "By the gate", to: [benID]))
+        try await wait("Ben has the order") { ben.orders.count == 1 }
+        ben.answer(try XCTUnwrap(ben.orders.first), .done)
+        XCTAssertTrue(ben.sendNote("At the gate"))
+        ben.setMyPosition(MemberPosition(at: GeoPoint(latitude: 42.37, longitude: -71.05), accuracy: 5, heading: 90, time: Date()), member: benID)
+        try await wait("all of it is logged") {
+            let kinds = Set(ana.logs.entries(of: mission).map(\.kind))
+            return kinds.isSuperset(of: [.order, .orderAnswer, .note, .position])
+        }
+        let later = ana.logs.entries(of: mission)
+        XCTAssertEqual(later.first { $0.kind == .order }?.text, "Hold position: By the gate, to Ben")
+        XCTAssertEqual(later.first { $0.kind == .orderAnswer }?.text, "Done")
+        XCTAssertEqual(later.first { $0.kind == .note }?.text, "At the gate")
+        XCTAssertTrue(later.contains { $0.kind == .position && $0.member == benID && $0.heading == 90 && $0.name == "Ben" })
+
+        // The log outlives the squad, can be exported whole, and can be deleted.
         ana.endSquad()
+        XCTAssertEqual(ana.logs.entries(of: mission).last?.kind, .squadEnded)
+        XCTAssertNotNil(ana.logs.missions().first { $0.id == mission }?.ended)
+        let zip = try XCTUnwrap(ana.logs.export(mission))
+        XCTAssertGreaterThan((try FileManager.default.attributesOfItem(atPath: zip.path)[.size] as? Int) ?? 0, 1000)
+        ana.logs.delete(mission)
+        XCTAssertTrue(ana.logs.missions().isEmpty)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: clipFile.path))
     }
 
     /// What an encoder gave, collected from its own queue.

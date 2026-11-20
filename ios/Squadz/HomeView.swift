@@ -9,6 +9,7 @@ struct HomeView: View {
     @AppStorage("relayPin") private var relayPin = ""
     @State private var squadName = ""
     @State private var scanning = false
+    @State private var reviewing = false
 
     private var me: String { name.trimmingCharacters(in: .whitespaces) }
     private var newSquad: String { squadName.trimmingCharacters(in: .whitespaces) }
@@ -64,6 +65,12 @@ struct HomeView: View {
                 }
 
                 Section {
+                    Button("Mission logs", systemImage: "list.bullet.clipboard") { reviewing = true }
+                } footer: {
+                    Text("What happened in each squad this device led: positions, orders, notes, and any clips and stills kept. Kept on this device only.")
+                }
+
+                Section {
                     TextField("Relay address", text: $relayURL, prompt: Text("relay.example.org"))
                         .textContentType(.URL)
                         .keyboardType(.URL)
@@ -83,6 +90,7 @@ struct HomeView: View {
                 if model.joining { ProgressView("Joining…").padding().background(.regularMaterial, in: .rect(cornerRadius: 12)) }
             }
             .fullScreenCover(isPresented: $scanning) { ScanView() }
+            .sheet(isPresented: $reviewing) { MissionListView() }
         }
     }
 

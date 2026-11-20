@@ -101,7 +101,16 @@ A first cut; [VIDEO.md](VIDEO.md) has the details and the limits.
 
 - **On a phone:** the camera button in the title bar asks before it starts, then streams this phone's camera to the leader's device. A red bar shows on every tab while it is on, with Stop. A *Stream video* order from the leader has a Start streaming button on it; being asked starts nothing.
 - **On the leader's device:** the panel has a **Video** section. It shows the stream and who it is from, and Stop ends it. To ask someone, send them a Stream video order.
-- One stream at a time, to the leader's device only, with no sound, and nothing is recorded. Everyone in the squad can see who is streaming.
+- **Record** and **Snap**, under the stream, keep a clip or a still in the mission log. The streaming phone's red bar says when it is being recorded and how many stills were kept, and the rest of the squad can see it too.
+- One stream at a time, to the leader's device only, with no sound. Everyone in the squad can see who is streaming.
+
+## The mission log
+
+[MISSION_LOG.md](MISSION_LOG.md) has what is in it and how it is stored.
+
+- **While leading,** the clipboard button opens the running log: who joined and left, orders and answers, notes, streams, clips and stills, with positions on their own tab.
+- **On the home screen,** *Mission logs* lists every squad this device has led. A mission can be exported whole as a zip, or deleted.
+- Only the leader's device keeps one.
 
 ## Leaving and ending
 

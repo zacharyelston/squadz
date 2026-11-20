@@ -12,6 +12,7 @@ struct SquadView: View {
     @State private var choosingDetails = false
     @State private var confirmingLeave = false
     @State private var confirmingStream = false
+    @State private var reviewing = false
     @State private var recenter = 0
     @State private var panel = LeaderPanel.Tab.team
     @State private var draft = OrderDraft()
@@ -49,6 +50,11 @@ struct SquadView: View {
                         .tint(model.isStreaming ? .red : nil)
                     }
                 }
+                if leading {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("Mission log", systemImage: "list.bullet.clipboard") { reviewing = true }
+                    }
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Squad settings", systemImage: "gearshape") { choosingDetails = true }
                 }
@@ -70,7 +76,15 @@ struct SquadView: View {
             .confirmationDialog("Stream this phone's camera to \(squadName)'s leader?", isPresented: $confirmingStream, titleVisibility: .visible) {
                 Button("Start streaming") { model.startStreaming() }
             } message: {
-                Text("Only the leader's device sees it, and nothing is recorded. The squad can see that you are streaming.")
+                Text("Only the leader's device sees it. The squad can see that you are streaming, and this phone tells you if the leader records it or keeps a still.")
+            }
+            .sheet(isPresented: $reviewing) {
+                NavigationStack {
+                    if let id = model.missionID, let info = model.logs.info(id) {
+                        MissionLogView(mission: info, live: true)
+                            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { reviewing = false } } }
+                    }
+                }
             }
             .sheet(isPresented: $inviting) { InviteView() }
             .sheet(isPresented: $choosingDetails) { SquadSettingsView(leading: leading) }
@@ -141,7 +155,7 @@ struct SquadView: View {
     @ViewBuilder private var banners: some View {
         if model.isStreaming {
             HStack {
-                Label("You are streaming to the leader", systemImage: "video.fill")
+                Label(model.streamingNote, systemImage: "video.fill")
                     .font(.subheadline.weight(.semibold))
                 Spacer()
                 Button("Stop") { model.stopStreaming() }
@@ -155,7 +169,7 @@ struct SquadView: View {
             .background(.red)
             .foregroundStyle(.white)
         } else if let stream = model.streams.first, !leading {
-            Label("\(model.name(of: stream.member)) is streaming to the leader", systemImage: "video")
+            Label("\(model.name(of: stream.member)) is streaming to the leader\(stream.recording ? ", and being recorded" : "")", systemImage: "video")
                 .font(.footnote)
                 .frame(maxWidth: .infinity)
                 .padding(6)
@@ -259,7 +273,19 @@ struct VideoPanel: View {
                 VideoLayerView(display: model.display)
                     .background(.black)
                     .clipShape(.rect(cornerRadius: 10))
-                Text("Only this device sees it. Nothing is recorded.")
+                HStack {
+                    Button(model.isRecording ? "Stop recording" : "Record", systemImage: model.isRecording ? "stop.circle.fill" : "record.circle") {
+                        if model.isRecording { model.stopRecording() } else { model.startRecording() }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(model.isRecording ? .red : .accentColor)
+                    Button("Snap", systemImage: "camera") { model.snap() }
+                        .buttonStyle(.bordered)
+                    Spacer()
+                }
+                Text(model.captureNote ?? (model.isRecording
+                     ? "Recording to this squad's mission log. \(model.name(of: stream.member)) and the squad can see that it is."
+                     : "Only this device sees the stream. Nothing is kept unless you record or snap, and the squad is told when you do."))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } else {

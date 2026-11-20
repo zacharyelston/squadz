@@ -13,8 +13,20 @@ A member's phone streams its camera to the leader's device. This is the smallest
 - **One stream at a time.** A second phone is turned down and told who is streaming.
 - **Everyone can see who is streaming.** It is in the squad's status; the streaming phone shows a red bar on every tab, with Stop on it.
 - **Either end stops it:** the phone, or the leader from the Video panel.
-- **Nothing is recorded.** A frame is shown and dropped.
+- **Nothing is kept unless the leader records or snaps,** and the squad is told when they do. See [Keeping what was seen](#keeping-what-was-seen).
 - **No sound.**
+
+## Keeping what was seen
+
+For looking back at a mission afterwards ([MISSION_LOG.md](MISSION_LOG.md)).
+
+- **Record** saves the stream to a video file on the leader's device as it arrives. The frames go into the file as the phone sent them; nothing is encoded again. The file starts at the next key frame, so up to two seconds after the tap.
+- **Snap** saves the picture on screen as a JPEG.
+- Both go in the squad's mission log with who was streaming, when, and where that member was.
+- **Everyone is shown.** The stream's entry in the squad's status carries `recording` and a count of `stills`, so the streaming phone's red bar says "and being recorded" and how many stills were kept, and the rest of the squad sees that the stream is being recorded. There is no way to record without that.
+- Only the leader's device can record, and what it keeps stays on it until the leader exports or deletes it.
+- A stream that ends closes its recording.
+- A still is as coarse as the stream. For a sharp picture the phone has to take one and send it, which the app doesn't do yet.
 
 ## How the pictures travel
 
@@ -58,7 +70,7 @@ The design this grew from (in the project's plan notes) uses WebRTC for the pict
 
 A payload that starts with `{` is control; one that starts with `01` is a frame.
 
-**In `status.missions`:** `{"streams": [{"id", "member", "since"}], "maxStreams": 1, "kbps": 300}`.
+**In `status.missions`:** `{"streams": [{"id", "member", "since", "recording", "stills"}], "maxStreams": 1, "kbps": 300}`. `recording` is whether the leader's device is saving the stream; `stills` is how many pictures it has kept from it. Both may be absent, meaning no and none.
 
 **The order kind** `squadz.video.stream` is the leader asking. A device that doesn't know it shows the order's text.
 
@@ -79,7 +91,8 @@ A payload that starts with `{` is control; one that starts with `01` is a frame.
 
 ## Tested, and not
 
-- `cd swift && swift test`: the mission's rules. One at a time, the leader's stop, a dropped phone, only the streaming phone's frames counting, and a device without the mission.
-- The app's tests in the simulator: made-up pictures through the real encoder, into frames, and back to something a screen can show; and three app instances where one streams to the leader, a second is turned down, and the leader and the phone each stop it.
+- `cd swift && swift test`: the mission's rules. One at a time, the leader's stop, a dropped phone, only the streaming phone's frames counting, everyone being told about recording and stills, and a device without the mission.
+- The app's tests in the simulator: made-up pictures through the real encoder, into frames, and back to something a screen can show; and three app instances where one streams to the leader, a second is turned down, and the leader and the phone each stop it. The same test records a clip and takes a still, checks the clip plays and the still opens, and that both phones were shown the recording.
 - By hand: a Mac stand-in streaming a test pattern to the app leading a squad in the simulator. The pattern showed, moving.
-- **Not tested:** a real camera, a real phone, a mesh, the relay with video on it, what it does to positions and orders on a slow link, and battery.
+- On a real iPhone and iPad on one Wi-Fi network: the phone's camera showed on the iPad. Recording and stills have not been tried there yet.
+- **Not tested:** a mesh, the relay with video on it, what it does to positions and orders on a slow link, and battery.

@@ -74,6 +74,40 @@ final class VideoMissionTests: XCTestCase {
         XCTAssertEqual(y.host.mission.streams.map(\.id), [bens])
     }
 
+    func testEveryoneIsToldWhenTheLeaderKeepsAnything() throws {
+        let y = Yard(mission: VideoMission())
+        y.join("Ana")
+        y.join("Ben")
+        let id = UUID()
+        y.send("Ana", control(.start, id))
+        XCTAssertEqual(streams(y, "Ana")?.first?.recording, false)
+        XCTAssertEqual(streams(y, "Ana")?.first?.stills, 0)
+
+        // Recording is in the status the moment it starts, for the streaming phone and for everyone else.
+        y.command { core, now in core.run(now) { mission, view in mission.setRecording(id, true, core: view) } }
+        XCTAssertEqual(streams(y, "Ana")?.first?.recording, true)
+        XCTAssertEqual(streams(y, "Ben")?.first?.recording, true)
+        // Saying it again sends nothing; a still is counted and told.
+        XCTAssertTrue(y.host.run(y.now) { mission, view in mission.setRecording(id, true, core: view) }.isEmpty)
+        y.command { core, now in core.run(now) { mission, view in mission.tookStill(id, core: view) } }
+        XCTAssertEqual(streams(y, "Ben")?.first?.stills, 1)
+        y.command { core, now in core.run(now) { mission, view in mission.setRecording(id, false, core: view) } }
+        XCTAssertEqual(streams(y, "Ana")?.first?.recording, false)
+
+        // A stream that isn't running can't be recorded, and a new stream starts unrecorded.
+        XCTAssertTrue(y.host.run(y.now) { mission, view in mission.setRecording(UUID(), true, core: view) }.isEmpty)
+        y.command { core, now in core.run(now) { mission, view in mission.setRecording(id, true, core: view) } }
+        y.send("Ana", control(.stop, id))
+        let next = UUID()
+        y.send("Ana", control(.start, next))
+        XCTAssertEqual(streams(y, "Ben")?.first?.recording, false)
+
+        // A status from a leader that keeps nothing still reads.
+        let old = Data(#"{"streams":[{"id":"00000000-0000-4000-8000-000000000001","member":"00000000-0000-4000-8000-000000000002","since":1800000000000}],"maxStreams":1,"kbps":300}"#.utf8)
+        let read = try SquadWire.decoder.decode(VideoMission.Status.self, from: old)
+        XCTAssertEqual(read.streams.first?.recording, false)
+    }
+
     func testFramesKeepTheirShapeAndOnlyTheStreamersCount() throws {
         let id = UUID()
         let frame = VideoMission.Frame(stream: id, count: 70_000, isKey: true, data: Data([0, 0, 0, 1, 0x67, 9, 8, 7]))

@@ -19,6 +19,30 @@ public struct VideoMission: Mission {
         public var id: UUID
         public var member: MemberID
         public var since: Date
+        /// The leader's device is saving this stream. Everyone is told, the streaming phone first.
+        public var recording: Bool
+        /// How many still pictures the leader's device has kept from it.
+        public var stills: Int
+
+        public init(id: UUID, member: MemberID, since: Date, recording: Bool = false, stills: Int = 0) {
+            self.id = id
+            self.member = member
+            self.since = since
+            self.recording = recording
+            self.stills = stills
+        }
+
+        private enum Keys: String, CodingKey { case id, member, since, recording, stills }
+
+        public init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: Keys.self)
+            id = try c.decode(UUID.self, forKey: .id)
+            member = try c.decode(MemberID.self, forKey: .member)
+            since = try c.decode(Date.self, forKey: .since)
+            // Absent from a leader that doesn't keep anything.
+            recording = try c.decodeIfPresent(Bool.self, forKey: .recording) ?? false
+            stills = try c.decodeIfPresent(Int.self, forKey: .stills) ?? 0
+        }
     }
 
     /// This mission's part of the squad's status: who is streaming, and the leader's limits.
@@ -171,6 +195,23 @@ public struct VideoMission: Mission {
         streams.removeAll { $0.id == id }
         let told = core.peer(of: stream.member).map { [Outgoing(to: $0, Self.message(Control(.stop, stream: id, why: "The leader stopped the stream.")))] } ?? []
         return .changed(told)
+    }
+
+    /// The leader's device starts or stops saving a stream. It is in the status at once, so the
+    /// streaming phone and the rest of the squad see it: nothing is kept without that. Run it
+    /// with `SquadCore.run`.
+    public mutating func setRecording(_ id: UUID, _ on: Bool, core: CoreView) -> MissionStep {
+        guard let i = streams.firstIndex(where: { $0.id == id }), streams[i].recording != on else { return .none }
+        streams[i].recording = on
+        return .changed()
+    }
+
+    /// The leader's device kept a still picture from a stream. Counted in the status for the
+    /// same reason.
+    public mutating func tookStill(_ id: UUID, core: CoreView) -> MissionStep {
+        guard let i = streams.firstIndex(where: { $0.id == id }) else { return .none }
+        streams[i].stills += 1
+        return .changed()
     }
 
     public func holds(core: CoreView, now: Date) -> Set<Hold> { [] }

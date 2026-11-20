@@ -1,4 +1,5 @@
 import AVFoundation
+import CoreImage
 import CoreMedia
 import SquadKit
 import UIKit
@@ -6,7 +7,8 @@ import VideoToolbox
 
 // Squad video, first cut (docs/VIDEO.md). A phone's camera is encoded as H.264 at a low bit rate
 // and sent, frame by frame, on the phone's own link to the leader's device, which decodes and
-// shows it. Nothing here keeps a frame: no recording.
+// shows it. A frame is shown and dropped, unless the leader is recording or snaps a still, which
+// the whole squad is shown (StreamRecorder and H264Display.still, below).
 
 /// Where pictures come from: the camera, or a made-up pattern where there is no camera.
 @MainActor
@@ -209,19 +211,48 @@ final class H264Display {
         layer.videoGravity = .resizeAspect
     }
 
-    /// Shows what a frame holds. A frame that arrives before any key frame shows nothing.
-    func show(_ annexB: Data) {
-        for sample in samples(annexB) {
-            if layer.status == .failed { layer.flush() }
-            layer.enqueue(sample)
-            shown += 1
-        }
+    /// The pictures since the last key frame, that one first: what a still is made from.
+    private var sinceKey: [CMSampleBuffer] = []
+
+    /// Shows what a frame holds, and hands back what was shown so it can be kept. A frame that
+    /// arrives before any key frame shows nothing.
+    @discardableResult
+    func show(_ annexB: Data, isKey: Bool = false) -> CMSampleBuffer? {
+        guard let sample = samples(annexB).first else { return nil }
+        if isKey { sinceKey = [] }
+        if isKey || !sinceKey.isEmpty { sinceKey.append(sample) }
+        if layer.status == .failed { layer.flush() }
+        layer.enqueue(sample)
+        shown += 1
+        return sample
     }
 
     func clear() {
         layer.flushAndRemoveImage()
         format = nil
         sets = nil
+        sinceKey = []
+    }
+
+    /// The picture on screen now, as a JPEG. It is decoded again from the last key frame on,
+    /// since the layer that draws the stream doesn't give its pictures back.
+    func still() -> Data? {
+        guard let format, !sinceKey.isEmpty else { return nil }
+        var made: VTDecompressionSession?
+        guard VTDecompressionSessionCreate(allocator: kCFAllocatorDefault, formatDescription: format, decoderSpecification: nil,
+                                           imageBufferAttributes: nil, outputCallback: nil, decompressionSessionOut: &made) == noErr,
+              let session = made else { return nil }
+        defer { VTDecompressionSessionInvalidate(session) }
+        var picture: CVImageBuffer?
+        for sample in sinceKey {
+            VTDecompressionSessionDecodeFrame(session, sampleBuffer: sample, flags: [], infoFlagsOut: nil) { status, _, image, _, _ in
+                if status == noErr, let image { picture = image }
+            }
+        }
+        VTDecompressionSessionWaitForAsynchronousFrames(session)
+        guard let picture else { return nil }
+        let image = CIImage(cvImageBuffer: picture)
+        return CIContext().jpegRepresentation(of: image, colorSpace: CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB())
     }
 
     /// The picture a frame holds, ready to show at once: none if no key frame has come yet. An
@@ -359,5 +390,72 @@ final class VideoStreamer {
             }
         }
         encoder?.encode(picture)
+    }
+}
+
+/// Saves a stream to a video file as it arrives, without encoding it again: the frames the phone
+/// sent go into the file as they are.
+@MainActor
+final class StreamRecorder {
+    let url: URL
+    let began: Date
+    private var writer: AVAssetWriter?
+    private var input: AVAssetWriterInput?
+    private var firstAt: Date?
+    private var last = CMTime.invalid
+    /// Pictures written so far.
+    private(set) var frames = 0
+
+    init(url: URL, now: Date = .now) {
+        self.url = url
+        began = now
+    }
+
+    /// Adds a picture. The file starts at the first key frame, since nothing before one can be shown.
+    func append(_ sample: CMSampleBuffer, isKey: Bool, now: Date = .now) {
+        if writer == nil {
+            guard isKey, let format = CMSampleBufferGetFormatDescription(sample),
+                  let made = try? AVAssetWriter(outputURL: url, fileType: .mp4) else { return }
+            let track = AVAssetWriterInput(mediaType: .video, outputSettings: nil, sourceFormatHint: format)
+            track.expectsMediaDataInRealTime = true
+            guard made.canAdd(track) else { return }
+            made.add(track)
+            guard made.startWriting() else { return }
+            made.startSession(atSourceTime: .zero)
+            writer = made
+            input = track
+            firstAt = now
+        }
+        guard let input, let firstAt, input.isReadyForMoreMediaData else { return }
+        // Pictures are timed by when they arrived, each strictly after the one before.
+        var time = CMTime(seconds: now.timeIntervalSince(firstAt), preferredTimescale: 600)
+        if last.isValid, time <= last { time = last + CMTime(value: 1, timescale: 600) }
+        last = time
+        var timing = CMSampleTimingInfo(duration: .invalid, presentationTimeStamp: time, decodeTimeStamp: .invalid)
+        var timed: CMSampleBuffer?
+        guard CMSampleBufferCreateCopyWithNewTiming(allocator: kCFAllocatorDefault, sampleBuffer: sample, sampleTimingEntryCount: 1,
+                                                    sampleTimingArray: &timing, sampleBufferOut: &timed) == noErr, let timed else { return }
+        if !isKey, let attachments = CMSampleBufferGetSampleAttachmentsArray(timed, createIfNecessary: true), CFArrayGetCount(attachments) > 0 {
+            let first = unsafeBitCast(CFArrayGetValueAtIndex(attachments, 0), to: CFMutableDictionary.self)
+            CFDictionarySetValue(first, Unmanaged.passUnretained(kCMSampleAttachmentKey_NotSync).toOpaque(),
+                                 Unmanaged.passUnretained(kCFBooleanTrue).toOpaque())
+        }
+        if input.append(timed) { frames += 1 }
+    }
+
+    /// Closes the file. Returns how long it runs, or nil if nothing was written (the file is removed).
+    func finish() async -> Double? {
+        guard let writer, let input, frames > 0 else {
+            self.writer?.cancelWriting()
+            try? FileManager.default.removeItem(at: url)
+            return nil
+        }
+        input.markAsFinished()
+        await writer.finishWriting()
+        guard writer.status == .completed else {
+            try? FileManager.default.removeItem(at: url)
+            return nil
+        }
+        return max(0.1, last.seconds)
     }
 }

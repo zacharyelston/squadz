@@ -98,6 +98,15 @@ final class AppModel {
 
     var isStreaming: Bool { myStream != nil }
 
+    /// What the streaming phone's own bar says: that it is streaming, and anything being kept.
+    var streamingNote: String {
+        guard let mine = streams.first(where: { $0.id == myStream }) else { return "You are streaming to the leader" }
+        var note = "You are streaming to the leader"
+        if mine.recording { note += ", and being recorded" }
+        if mine.stills > 0 { note += " · \(mine.stills) \(mine.stills == 1 ? "still" : "stills") kept" }
+        return note
+    }
+
     func name(of member: MemberID) -> String {
         squad?.members.first { $0.id == member }?.name ?? "Someone"
     }
@@ -145,10 +154,93 @@ final class AppModel {
         updateLeader { $0.run(.now) { mission, view in mission.stop(id, core: view) } }
     }
 
-    /// On the leader's device: a frame from a phone. Shown only if that phone is the one streaming.
+    /// On the leader's device: a frame from a phone. Shown only if that phone is the one
+    /// streaming, and kept only while the leader is recording.
     private func show(_ frame: VideoMission.Frame, from peer: PeerID) {
         guard let core, let member = core.peers[peer], core.mission.accepts(frame, from: member, core: core.view) else { return }
-        display.show(frame.data)
+        guard let sample = display.show(frame.data, isKey: frame.isKey) else { return }
+        if let recording, recording.stream == frame.stream { recording.recorder.append(sample, isKey: frame.isKey) }
+    }
+
+    // MARK: The mission log (MissionLog.swift)
+
+    /// Every squad this device has led, as logs on this device.
+    let logs: MissionLogStore
+    private var logger = MissionLogger(resuming: Optional<SquadCore<VideoMission>>.none)
+    /// Goes up whenever something is added to a log, so a screen showing one reads it again.
+    private(set) var logChanges = 0
+    /// The log of the squad this device is leading now.
+    var missionID: UUID? { role == .leader ? squad?.id.raw : nil }
+
+    private func log(_ entries: [LogEntry]) {
+        guard let id = missionID, !entries.isEmpty else { return }
+        logs.append(entries, to: id)
+        logChanges += 1
+    }
+
+    private struct Recording {
+        /// The squad whose log the clip goes in, kept here because the squad may be over by the time the file is closed.
+        var mission: UUID
+        var stream: UUID
+        var member: MemberID
+        var at: GeoPoint?
+        var file: String
+        var recorder: StreamRecorder
+    }
+
+    private var recording: Recording?
+    var isRecording: Bool { recording != nil }
+    /// The last thing kept, to say so on screen for a moment.
+    private(set) var captureNote: String?
+
+    /// The leader starts keeping the stream on screen. The squad's status says so at once.
+    func startRecording() {
+        guard role == .leader, recording == nil, let stream = streams.first, let id = missionID else { return }
+        let media = logs.newMedia(in: id, kind: .clip, now: .now)
+        recording = Recording(mission: id, stream: stream.id, member: stream.member, at: positions[stream.member]?.at, file: media.name,
+                              recorder: StreamRecorder(url: media.url))
+        updateLeader { $0.run(.now) { mission, view in mission.setRecording(stream.id, true, core: view) } }
+    }
+
+    func stopRecording() {
+        endRecording(tellSquad: true)
+    }
+
+    /// Closes the clip and puts it in the mission's log.
+    private func endRecording(tellSquad: Bool) {
+        guard let done = recording else { return }
+        recording = nil
+        if tellSquad { updateLeader { $0.run(.now) { mission, view in mission.setRecording(done.stream, false, core: view) } } }
+        let name = name(of: done.member)
+        Task { [weak self] in
+            guard let seconds = await done.recorder.finish() else { return }
+            guard let self else { return }
+            self.logs.append([LogEntry(time: done.recorder.began, kind: .clip, member: done.member, name: name, at: done.at,
+                                       ref: done.stream, file: done.file, seconds: seconds)], to: done.mission)
+            self.logChanges += 1
+            self.say("Clip saved to the mission log.")
+        }
+    }
+
+    /// The leader keeps the picture on screen now as a still. The squad's status counts it.
+    @discardableResult
+    func snap() -> Bool {
+        guard role == .leader, let stream = streams.first, let id = missionID, let jpeg = display.still() else { return false }
+        let media = logs.newMedia(in: id, kind: .still, now: .now)
+        guard (try? jpeg.write(to: media.url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])) != nil else { return false }
+        log([LogEntry(time: .now, kind: .still, member: stream.member, name: name(of: stream.member), at: positions[stream.member]?.at,
+                      ref: stream.id, file: media.name)])
+        updateLeader { $0.run(.now) { mission, view in mission.tookStill(stream.id, core: view) } }
+        say("Still saved to the mission log.")
+        return true
+    }
+
+    private func say(_ text: String) {
+        captureNote = text
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(4))
+            if self?.captureNote == text { self?.captureNote = nil }
+        }
     }
 
     /// The pictures a simulator sends, since it has no camera.
@@ -202,6 +294,7 @@ final class AppModel {
         self.defaults = defaults
         keychain = SquadKeychain(service: keychainService)
         self.folder = folder
+        logs = MissionLogStore(root: folder.appendingPathComponent("missions"))
         self.service = service
         self.advertise = advertise
         if let saved = defaults.string(forKey: "device").flatMap(UUID.init(uuidString:)) {
@@ -319,6 +412,12 @@ final class AppModel {
             self.me = me
             leaderID = me
             role = .leader
+            // The squad's log: a new one, or the one this squad already has after a restart.
+            // Whoever is on the roster now is not joining now: at the start that is the leader alone.
+            logger = MissionLogger(resuming: core)
+            if logs.begin(core.squadID.raw, name: core.squad.name, now: .now) {
+                logs.append([LogEntry(time: .now, kind: .squadStarted, name: core.squad.members.first { $0.id == me }?.name, text: core.squad.name)], to: core.squadID.raw)
+            }
             leadingRelay = relay
             // The leader's rate from last time carries to this squad; everyone hears it as they join.
             if let chosen = defaults.object(forKey: "reportEvery") as? Int {
@@ -407,6 +506,9 @@ final class AppModel {
         if live.isEmpty, !streams.isEmpty { display.clear() }
         streams = live
         videoKbps = core.mission.kbps
+        // A stream that ended takes its recording with it: close the clip.
+        if let recording, !live.contains(where: { $0.id == recording.stream }) { endRecording(tellSquad: false) }
+        log(logger.changes(in: core, streams: live, now: .now))
         notes = core.notes
         cancelledOrders = core.cancelled
         refreshLinks()
@@ -590,6 +692,9 @@ final class AppModel {
     /// Ends the squad: everyone is cut off and nothing of it is kept.
     func endSquad() {
         guard role == .leader, let id = core?.squadID else { return }
+        endRecording(tellSquad: false)
+        log([LogEntry(time: .now, kind: .squadEnded, text: squad?.name)])
+        logs.end(id.raw, now: .now)
         if let out = core?.resetSquad(now: .now) {
             host?.send(out)
             relayHost?.send(out)
@@ -795,6 +900,7 @@ final class AppModel {
         streamer = nil
         myStream = nil
         streams = []
+        endRecording(tellSquad: false)
         display.clear()
         reportEvery = Self.defaultReportEvery
         notes = []
