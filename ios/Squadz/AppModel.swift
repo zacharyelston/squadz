@@ -56,6 +56,8 @@ final class AppModel {
     private(set) var invite: SquadInvite?
     /// How the relay is doing, for a line under the title. Nil for a squad without one.
     private(set) var relayNote: String?
+    /// The latest thing the squad was told, like "Ana left the squad." Shown for a short while.
+    private(set) var notice: Notice?
 
     let device: UUID
     private let defaults: UserDefaults
@@ -255,6 +257,9 @@ final class AppModel {
         relayHost?.setKeys(core.linkKeys(now: .now), invites: core.relayInvites(now: .now))
         squad = core.squad
         positions = core.positions
+        if let latest = core.notices.last {
+            tell(latest)
+        }
         if let invite, invite.isExpired(now: .now) || !core.invitations.contains(where: { $0.secret == invite.enrol }) {
             self.invite = nil
         }
@@ -395,6 +400,9 @@ final class AppModel {
             show(s.squad)
         case let .positions(report):
             for p in report.positions { if let m = p.member { positions[m] = p } }
+        case let .notice(n):
+            if let m = n.member { positions[m] = nil }
+            tell(n)
         default:
             break
         }
@@ -430,7 +438,8 @@ final class AppModel {
 
     func leaveSquad() {
         guard role == .member, let id = squad?.id else { return }
-        client?.stop()
+        // For good: the leader's device takes this phone off the squad and tells the others.
+        client?.stop(forGood: true)
         forgetMembership(of: id)
     }
 
@@ -440,7 +449,21 @@ final class AppModel {
         clear()
     }
 
+    private var shownNotice: UUID?
+
+    /// Shows a notice for a quarter of a minute.
+    private func tell(_ n: Notice) {
+        guard n.id != shownNotice else { return }
+        shownNotice = n.id
+        notice = n
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(15))
+            if self?.notice?.id == n.id { self?.notice = nil }
+        }
+    }
+
     private func clear() {
+        notice = nil
         ticker?.cancel()
         ticker = nil
         location.stop()

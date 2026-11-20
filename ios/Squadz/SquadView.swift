@@ -21,6 +21,13 @@ struct SquadView: View {
                         .padding(8)
                         .background(.yellow.opacity(0.3))
                 }
+                if let notice = model.notice {
+                    Label(notice.text, systemImage: "person.fill.xmark")
+                        .font(.footnote)
+                        .frame(maxWidth: .infinity)
+                        .padding(8)
+                        .background(.blue.opacity(0.15))
+                }
                 if let note = model.relayNote {
                     Label(note, systemImage: "antenna.radiowaves.left.and.right")
                         .font(.footnote)
