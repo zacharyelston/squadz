@@ -36,7 +36,7 @@
 		<string>_squadz._tcp</string>
 	</array>
 	<key>NSCameraUsageDescription</key>
-	<string>Squadz uses the camera to scan a squad's invite code.</string>
+	<string>Squadz uses the camera to scan a squad's invite code, and to stream what you see to your squad's leader when you choose to.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Squadz finds your squad's leader on the local network and connects to it directly.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>

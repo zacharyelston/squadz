@@ -11,6 +11,7 @@ struct SquadView: View {
     @State private var inviting = false
     @State private var choosingDetails = false
     @State private var confirmingLeave = false
+    @State private var confirmingStream = false
     @State private var recenter = 0
     @State private var panel = LeaderPanel.Tab.team
     @State private var draft = OrderDraft()
@@ -40,6 +41,14 @@ struct SquadView: View {
                 ToolbarItem(placement: .topBarLeading) {
                     Button(leading ? "End" : "Leave", role: .destructive) { confirmingLeave = true }
                 }
+                if !leading {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button(model.isStreaming ? "Stop streaming" : "Stream to the leader", systemImage: model.isStreaming ? "video.fill" : "video") {
+                            if model.isStreaming { model.stopStreaming() } else { confirmingStream = true }
+                        }
+                        .tint(model.isStreaming ? .red : nil)
+                    }
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Squad settings", systemImage: "gearshape") { choosingDetails = true }
                 }
@@ -57,6 +66,11 @@ struct SquadView: View {
                 }
             } message: {
                 Text(leading ? "Everyone is disconnected and has to join a new squad." : "You'll need a new invite to come back.")
+            }
+            .confirmationDialog("Stream this phone's camera to \(squadName)'s leader?", isPresented: $confirmingStream, titleVisibility: .visible) {
+                Button("Start streaming") { model.startStreaming() }
+            } message: {
+                Text("Only the leader's device sees it, and nothing is recorded. The squad can see that you are streaming.")
             }
             .sheet(isPresented: $inviting) { InviteView() }
             .sheet(isPresented: $choosingDetails) { SquadSettingsView(leading: leading) }
@@ -125,6 +139,28 @@ struct SquadView: View {
     // MARK: Shared
 
     @ViewBuilder private var banners: some View {
+        if model.isStreaming {
+            HStack {
+                Label("You are streaming to the leader", systemImage: "video.fill")
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+                Button("Stop") { model.stopStreaming() }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.white)
+                    .foregroundStyle(.red)
+                    .controlSize(.small)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(.red)
+            .foregroundStyle(.white)
+        } else if let stream = model.streams.first, !leading {
+            Label("\(model.name(of: stream.member)) is streaming to the leader", systemImage: "video")
+                .font(.footnote)
+                .frame(maxWidth: .infinity)
+                .padding(6)
+                .background(.red.opacity(0.15))
+        }
         if let problem = model.linkProblem {
             Label(problem, systemImage: "wifi.exclamationmark")
                 .font(.footnote)
@@ -204,9 +240,77 @@ struct MapButtonStyle: ButtonStyle {
     }
 }
 
+/// On the leader's device: the stream someone is sending, and the button that ends it.
+struct VideoPanel: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if let stream = model.streams.first {
+                HStack {
+                    Label("\(model.name(of: stream.member)), since \(stream.since.formatted(date: .omitted, time: .shortened))", systemImage: "video.fill")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.red)
+                    Spacer()
+                    Button("Stop", role: .destructive) { model.stopStream(stream.id) }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                }
+                VideoLayerView(display: model.display)
+                    .background(.black)
+                    .clipShape(.rect(cornerRadius: 10))
+                Text("Only this device sees it. Nothing is recorded.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                Text("Nobody is streaming.")
+                    .font(.subheadline.weight(.semibold))
+                Text("A member can start from the camera button on their phone. To ask someone, send them a Stream video order; their camera still starts only when they tap.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: 0)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.bottom, 10)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+}
+
+/// The layer the decoder draws on.
+struct VideoLayerView: UIViewRepresentable {
+    let display: H264Display
+
+    final class Holder: UIView {
+        var video: CALayer? {
+            didSet {
+                oldValue?.removeFromSuperlayer()
+                if let video { layer.addSublayer(video) }
+            }
+        }
+        override func layoutSubviews() {
+            super.layoutSubviews()
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            video?.frame = bounds
+            CATransaction.commit()
+        }
+    }
+
+    func makeUIView(context: Context) -> Holder {
+        let view = Holder()
+        view.video = display.layer
+        return view
+    }
+
+    func updateUIView(_ view: Holder, context: Context) {
+        if view.video !== display.layer { view.video = display.layer }
+    }
+}
+
 /// Beside the leader's map: the team, or orders.
 struct LeaderPanel: View {
-    enum Tab: Hashable { case team, orders, notes }
+    enum Tab: Hashable { case team, orders, notes, video }
 
     @Environment(AppModel.self) private var model
     @Binding var tab: Tab
@@ -220,6 +324,7 @@ struct LeaderPanel: View {
                 Text("Team").tag(Tab.team)
                 Text(model.openOrders.isEmpty ? "Orders" : "Orders (\(model.openOrders.count))").tag(Tab.orders)
                 Text(model.unreadNotes == 0 || tab == .notes ? "Notes" : "Notes (\(model.unreadNotes))").tag(Tab.notes)
+                Text(model.streams.isEmpty ? "Video" : "Video ●").tag(Tab.video)
             }
             .pickerStyle(.segmented)
             .padding(.horizontal, 12)
@@ -228,6 +333,7 @@ struct LeaderPanel: View {
             case .team: MemberList(now: now)
             case .orders: OrdersPanel(draft: $draft, placing: $placing)
             case .notes: NotesView()
+            case .video: VideoPanel()
             }
         }
         .background(Color(.systemBackground))

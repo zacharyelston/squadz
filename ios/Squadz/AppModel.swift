@@ -82,6 +82,84 @@ final class AppModel {
     private(set) var notesRead = 0
     var unreadNotes: Int { max(0, notes.count - notesRead) }
 
+    // MARK: Video (docs/VIDEO.md)
+
+    /// Who is streaming their camera to the leader's device, as the leader's device says.
+    private(set) var streams: [VideoMission.Stream] = []
+    /// The bit rate the leader asks streaming phones to keep to.
+    private(set) var videoKbps = 300
+    /// On a member's phone: the stream it is sending. Nil when it isn't.
+    private(set) var myStream: UUID?
+    private var streamer: VideoStreamer?
+    /// On the leader's device: where the pictures are drawn.
+    let display = H264Display()
+    /// Where a phone's pictures come from. Tests and the simulator give a made-up pattern.
+    var videoSource: (@MainActor () -> FrameSource)?
+
+    var isStreaming: Bool { myStream != nil }
+
+    func name(of member: MemberID) -> String {
+        squad?.members.first { $0.id == member }?.name ?? "Someone"
+    }
+
+    /// A member starts streaming this phone's camera to the leader's device. Only ever from a
+    /// tap on this phone.
+    func startStreaming() {
+        guard role == .member, myStream == nil else { return }
+        guard linkProblem == nil else {
+            alert = "This phone isn't linked to the squad right now."
+            return
+        }
+        let id = UUID()
+        let made = videoSource?() ?? Self.defaultSource()
+        let streamer = VideoStreamer(stream: id, source: made, kbps: videoKbps) { [weak self] frame in
+            guard let self, self.myStream == frame.stream else { return }
+            self.client?.send(VideoMission.message(frame))
+        }
+        myStream = id
+        self.streamer = streamer
+        client?.send(VideoMission.message(VideoMission.Control(.start, stream: id)))
+        Task { [weak self] in
+            if await streamer.start() == false {
+                self?.endStream(tellLeader: true)
+                self?.alert = "Squadz couldn't use the camera. Allow it in Settings, then try again."
+            }
+        }
+    }
+
+    func stopStreaming() {
+        endStream(tellLeader: true)
+    }
+
+    private func endStream(tellLeader: Bool) {
+        guard let id = myStream else { return }
+        streamer?.stop()
+        streamer = nil
+        myStream = nil
+        if tellLeader { client?.send(VideoMission.message(VideoMission.Control(.stop, stream: id))) }
+    }
+
+    /// The leader ends someone's stream.
+    func stopStream(_ id: UUID) {
+        guard role == .leader else { return }
+        updateLeader { $0.run(.now) { mission, view in mission.stop(id, core: view) } }
+    }
+
+    /// On the leader's device: a frame from a phone. Shown only if that phone is the one streaming.
+    private func show(_ frame: VideoMission.Frame, from peer: PeerID) {
+        guard let core, let member = core.peers[peer], core.mission.accepts(frame, from: member, core: core.view) else { return }
+        display.show(frame.data)
+    }
+
+    /// The pictures a simulator sends, since it has no camera.
+    private static func defaultSource() -> FrameSource {
+        #if targetEnvironment(simulator)
+        PatternSource()
+        #else
+        CameraSource()
+        #endif
+    }
+
     /// Called on a member's phone when an order it didn't have arrives: the app buzzes.
     var orderArrived: ((Order) -> Void)?
     /// On a member's phone: what it answered.
@@ -100,7 +178,7 @@ final class AppModel {
     var heading: Double? { compass.heading }
     private var ticker: Task<Void, Never>?
 
-    private var core: SquadCore<NoMission>?
+    private var core: SquadCore<VideoMission>?
     private var lastSaved: LeaderSaved?
     private var host: SquadLinkHost?
     private var relayHost: RelayLinkHost?
@@ -166,7 +244,7 @@ final class AppModel {
     func resume() {
         guard role == .none else { return }
         if let saved = loadLeader(), let keys = try? keychain.leaderKeys(for: saved.squad.id) {
-            lead(SquadCore(squad: saved.squad, mission: NoMission(), keys: keys, credentials: saved.credentials,
+            lead(SquadCore(squad: saved.squad, mission: VideoMission(), keys: keys, credentials: saved.credentials,
                            epoch: saved.epoch, keyChanges: saved.keyChanges, revision: saved.revision, sharesPositions: true, sharesNotes: true),
                  me: saved.me, relay: saved.relay)
         } else if let id = defaults.string(forKey: "memberSquad").flatMap(UUID.init(uuidString:)),
@@ -199,7 +277,7 @@ final class AppModel {
             return
         }
         let mine = Member(name: myName, device: device)
-        let core = SquadCore(squad: Squad(name: squadName, members: [mine]), mission: NoMission(), sharesPositions: true, sharesNotes: true)
+        let core = SquadCore(squad: Squad(name: squadName, members: [mine]), mission: VideoMission(), sharesPositions: true, sharesNotes: true)
         do {
             try keychain.save(core.keys, for: core.squadID)
         } catch {
@@ -210,7 +288,7 @@ final class AppModel {
         if role != .leader { try? keychain.removeLeaderKeys(for: core.squadID) }
     }
 
-    private func lead(_ core: SquadCore<NoMission>, me: MemberID, relay: RelayAddress?) {
+    private func lead(_ core: SquadCore<VideoMission>, me: MemberID, relay: RelayAddress?) {
         do {
             let host = try SquadLinkHost(name: core.squad.name, keys: core.linkKeys(now: .now), service: service,
                                          txt: [SquadService.Key.tag: core.squadID.tag], advertise: advertise)
@@ -219,6 +297,11 @@ final class AppModel {
             }
             host.onMessage = { [weak self] message, peer in
                 MainActor.assumeIsolated {
+                    // Pictures go to the screen, not through the squad's state.
+                    if case let .mission(m) = message.body, let frame = VideoMission.frame(in: m) {
+                        self?.show(frame, from: peer)
+                        return
+                    }
                     self?.updateLeader { $0.handle(message, from: peer, now: .now) }
                 }
             }
@@ -255,7 +338,7 @@ final class AppModel {
 
     /// The squad's room on its relay. Members' links arrive through it exactly as they do from
     /// the local network, and the core treats them the same.
-    private func openRoom(on relay: RelayAddress, for core: SquadCore<NoMission>) {
+    private func openRoom(on relay: RelayAddress, for core: SquadCore<VideoMission>) {
         let id = core.squadID
         let room = RelayLinkHost(address: relay, squad: id, token: try? keychain.relayToken(for: id),
                                  keys: core.linkKeys(now: .now), invites: core.relayInvites(now: .now))
@@ -264,6 +347,10 @@ final class AppModel {
         }
         room.onMessage = { [weak self] message, peer in
             MainActor.assumeIsolated {
+                if case let .mission(m) = message.body, let frame = VideoMission.frame(in: m) {
+                    self?.show(frame, from: peer)
+                    return
+                }
                 self?.updateLeader { $0.handle(message, from: peer, now: .now) }
             }
         }
@@ -286,7 +373,7 @@ final class AppModel {
 
     /// A reply can hand a member their credential. Keep the state it depends on
     /// before sending it or installing the new link keys.
-    private func updateLeader(_ change: (inout SquadCore<NoMission>) -> [Outgoing]) {
+    private func updateLeader(_ change: (inout SquadCore<VideoMission>) -> [Outgoing]) {
         guard var next = core, let me else { return }
         let out = change(&next)
         do {
@@ -316,6 +403,10 @@ final class AppModel {
         positions = core.positions
         orders = core.orders.reversed()
         answers = core.acks
+        let live = core.mission.active(core: core.view)
+        if live.isEmpty, !streams.isEmpty { display.clear() }
+        streams = live
+        videoKbps = core.mission.kbps
         notes = core.notes
         cancelledOrders = core.cancelled
         refreshLinks()
@@ -517,7 +608,7 @@ final class AppModel {
 
     private var leaderFile: URL { folder.appendingPathComponent("leading.json") }
 
-    private func saveLeader(_ core: SquadCore<NoMission>, me: MemberID, relay: RelayAddress?) throws {
+    private func saveLeader(_ core: SquadCore<VideoMission>, me: MemberID, relay: RelayAddress?) throws {
         let saved = LeaderSaved(squad: core.squad, me: me, credentials: core.credentials, epoch: core.epoch,
                                 keyChanges: core.keyChanges, revision: core.revision, relay: relay)
         guard saved != lastSaved else { return }
@@ -608,6 +699,15 @@ final class AppModel {
         case let .status(s):
             show(s.squad)
             follow(s.reportEvery)
+            if let video = VideoMission.status(in: s) {
+                streams = video.streams
+                videoKbps = video.kbps
+            }
+        case let .mission(m):
+            // The leader's device ending this phone's stream, or turning it down.
+            guard let control = VideoMission.control(in: m), control.stream == myStream else { break }
+            endStream(tellLeader: false)
+            if control.t == .refused { alert = control.why ?? "The leader's device didn't take the stream." }
         case let .positions(report):
             for p in report.positions { if let m = p.member { positions[m] = p } }
         case let .notice(n):
@@ -691,6 +791,11 @@ final class AppModel {
         answers = [:]
         myAnswers = [:]
         cancelledOrders = []
+        streamer?.stop()
+        streamer = nil
+        myStream = nil
+        streams = []
+        display.clear()
         reportEvery = Self.defaultReportEvery
         notes = []
         notesRead = 0

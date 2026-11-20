@@ -32,6 +32,7 @@ One device starts a squad and leads it; the others scan its invite code, confirm
 - **Orders.** The leader sends one member, several, or the whole squad somewhere with a tap on the map, tells them to hold, or sends a note. Each answers Seen, Done or Can't, and the leader sees every answer. The leader can take an order back.
 - **Field notes.** A chat the whole squad reads and writes.
 - **Leaving and removing.** Either one tells the rest of the squad.
+- **Video, a first cut.** A member can stream their camera to the leader's device: one at a time, only on a tap, nothing recorded. [`docs/VIDEO.md`](docs/VIDEO.md) says how it works and what it doesn't do yet. Not yet tried on real phones.
 
 [`docs/APP.md`](docs/APP.md) walks through every screen.
 
@@ -125,4 +126,4 @@ cd swift && swift test
 cd ios && xcodegen generate && xcodebuild -project Squadz.xcodeproj -scheme Squadz -destination 'platform=iOS Simulator,name=iPhone 18 Pro' test
 ```
 
-The Swift tests that go through a relay start the one just built, and are skipped if it isn't there. As of this writing: 12 relay tests, 68 package tests and 8 app tests.
+The Swift tests that go through a relay start the one just built, and are skipped if it isn't there. As of this writing: 12 relay tests, 72 package tests and 10 app tests.

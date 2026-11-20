@@ -95,6 +95,14 @@ The gear button.
 - **Show under each member:** which details the team list shows on this device.
 - **Position updates**, leader only: how often every device in the squad sends where it is and which way it points, from every 2 seconds to every minute. Each device takes it up as it joins, and again if the leader changes it. Faster uses more battery on every phone.
 
+## Video
+
+A first cut; [VIDEO.md](VIDEO.md) has the details and the limits.
+
+- **On a phone:** the camera button in the title bar asks before it starts, then streams this phone's camera to the leader's device. A red bar shows on every tab while it is on, with Stop. A *Stream video* order from the leader has a Start streaming button on it; being asked starts nothing.
+- **On the leader's device:** the panel has a **Video** section. It shows the stream and who it is from, and Stop ends it. To ask someone, send them a Stream video order.
+- One stream at a time, to the leader's device only, with no sound, and nothing is recorded. Everyone in the squad can see who is streaming.
+
 ## Leaving and ending
 
 - **Leave**, on a member's phone: the leader's device takes that phone off the squad and tells everyone else. Coming back needs a new invite.
