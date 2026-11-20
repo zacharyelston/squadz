@@ -21,7 +21,7 @@ struct SquadView: View {
     /// the screen. Kept across launches.
     @AppStorage("showsList") private var showsList = true
 
-    enum MemberTab { case map, orders }
+    enum MemberTab { case map, orders, notes }
 
     private var leading: Bool { model.role == .leader }
     private var squadName: String { model.squad?.name ?? "this squad" }
@@ -113,6 +113,11 @@ struct SquadView: View {
                 .tabItem { Label("Orders", systemImage: "flag") }
                 .tag(MemberTab.orders)
                 .badge(model.queue.count)
+
+            NotesView()
+                .tabItem { Label("Notes", systemImage: "bubble.left.and.bubble.right") }
+                .tag(MemberTab.notes)
+                .badge(memberTab == .notes ? 0 : model.unreadNotes)
         }
     }
 
@@ -197,7 +202,7 @@ struct MapButtonStyle: ButtonStyle {
 
 /// Beside the leader's map: the team, or orders.
 struct LeaderPanel: View {
-    enum Tab: Hashable { case team, orders }
+    enum Tab: Hashable { case team, orders, notes }
 
     @Environment(AppModel.self) private var model
     @Binding var tab: Tab
@@ -209,7 +214,8 @@ struct LeaderPanel: View {
         VStack(spacing: 0) {
             Picker("Panel", selection: $tab) {
                 Text("Team").tag(Tab.team)
-                Text(model.openOrders.isEmpty ? "Orders" : "Orders (\(model.openOrders.count) open)").tag(Tab.orders)
+                Text(model.openOrders.isEmpty ? "Orders" : "Orders (\(model.openOrders.count))").tag(Tab.orders)
+                Text(model.unreadNotes == 0 || tab == .notes ? "Notes" : "Notes (\(model.unreadNotes))").tag(Tab.notes)
             }
             .pickerStyle(.segmented)
             .padding(.horizontal, 12)
@@ -217,6 +223,7 @@ struct LeaderPanel: View {
             switch tab {
             case .team: MemberList(now: now)
             case .orders: OrdersPanel(draft: $draft, placing: $placing)
+            case .notes: NotesView()
             }
         }
         .background(Color(.systemBackground))

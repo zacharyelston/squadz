@@ -52,6 +52,9 @@ public struct SquadCore<M: Mission> {
     /// Whether members see each other's positions, as observers always do. The leader's choice:
     /// on for a squad that is out together, off where only the leader should know where people are.
     public var sharesPositions: Bool
+    /// Whether members see each other's notes, like a chat room, as observers always do. Off,
+    /// notes go to the leader only.
+    public var sharesNotes: Bool
     /// The last thing that went wrong, for the leader's screen.
     public private(set) var lastProblem: String?
     /// Notes from members, oldest first (passed on to observers as they arrive).
@@ -66,6 +69,7 @@ public struct SquadCore<M: Mission> {
     static var maxNoticesKept: Int { 50 }
     static var maxOrdersKept: Int { 100 }
     static var maxNotesKept: Int { 100 }
+    static var notesOnJoin: Int { 50 }
 
     /// Check fire in force, from any member or this device. Only the leader lifts it.
     public private(set) var activeCheckFire: CheckFire?
@@ -74,8 +78,10 @@ public struct SquadCore<M: Mission> {
     /// A new squad, or one read back: `keys` from the Keychain, the rest from where the app
     /// saved it.
     public init(squad: Squad, mission: M, keys: LeaderKeys = LeaderKeys(), credentials: [CredentialRecord] = [],
-                epoch: Int = 0, keyChanges: [LeaderKeyChange] = [], revision: Int = 0, sharesPositions: Bool = false) {
+                epoch: Int = 0, keyChanges: [LeaderKeyChange] = [], revision: Int = 0, sharesPositions: Bool = false,
+                sharesNotes: Bool = false) {
         self.sharesPositions = sharesPositions
+        self.sharesNotes = sharesNotes
         self.squad = squad
         self.mission = mission
         self.keys = keys
@@ -188,10 +194,11 @@ public struct SquadCore<M: Mission> {
             return report(p, except: peer)
         case var .note(n):
             n.author = squad.members.first { $0.id == member }?.name ?? n.author
+            guard !notes.contains(where: { $0.id == n.id }) else { return [] }   // sent twice
             notes.append(n)
             if notes.count > Self.maxNotesKept { notes.removeFirst(notes.count - Self.maxNotesKept) }
-            let toObservers = view.observerPeers.map { Outgoing(to: $0, .note(n)) }
-            return [Outgoing(to: peer, .receipt(Receipt(id: n.id, status: .stored, detail: "Sent to \(squad.name)'s leader.")))] + toObservers
+            return [Outgoing(to: peer, .receipt(Receipt(id: n.id, status: .stored, detail: "Sent to \(squad.name)'s leader.")))]
+                + passOn(n, except: peer)
         case let .orderAck(a):
             // Only from someone the order was for.
             guard let o = orders.first(where: { $0.id == a.order }), o.isFor(member), !cancelled.contains(o.id) else { return [] }
@@ -280,10 +287,12 @@ public struct SquadCore<M: Mission> {
         // Orders for this member that it hasn't finished, so a rejoin (or a late joiner) has them.
         let open = orders.filter { $0.isFor(id) && !cancelled.contains($0.id) && acks[$0.id]?[id] != .done && acks[$0.id]?[id] != .cannot }.suffix(10)
         let known = sharesPositions ? positions.values.filter { $0.member != id }.sorted { $0.time < $1.time } : []
+        // What has been said, so someone who joins late or comes back can read up.
+        let said = sharesNotes ? notes.suffix(Self.notesOnJoin).map { Outgoing(to: peer, .note($0)) } : []
         // And the ones taken back, in case it was away when they were.
         let taken = orders.filter { $0.isFor(id) && cancelled.contains($0.id) }.suffix(10)
         return changes + [Outgoing(to: peer, .welcome(Welcome(member: id, squad: squad)))]
-            + open.map { Outgoing(to: peer, .order($0)) } + taken.map { Outgoing(to: peer, .orderCancel($0.id)) } + changed(now: now)
+            + open.map { Outgoing(to: peer, .order($0)) } + taken.map { Outgoing(to: peer, .orderCancel($0.id)) } + said + changed(now: now)
             + (known.isEmpty ? [] : [Outgoing(to: peer, .positions(PositionsReport(squad: squadID, positions: known)))])
     }
 
@@ -398,6 +407,19 @@ public struct SquadCore<M: Mission> {
         if orders.count > Self.maxOrdersKept { orders.removeFirst(orders.count - Self.maxOrdersKept) }
         let members = peers.filter { order.isFor($0.value) }.map(\.key)
         return (members + Array(observers)).sorted { $0.raw < $1.raw }.map { Outgoing(to: $0, .order(order)) }
+    }
+
+    /// A note from the leader's own device, to everyone who gets notes.
+    public mutating func postNote(_ note: FieldNote) -> [Outgoing] {
+        notes.append(note)
+        if notes.count > Self.maxNotesKept { notes.removeFirst(notes.count - Self.maxNotesKept) }
+        return passOn(note, except: nil)
+    }
+
+    /// A note to observers, and to the other members when the squad shares notes.
+    private func passOn(_ note: FieldNote, except sender: PeerID?) -> [Outgoing] {
+        let members = sharesNotes ? peers.keys.filter { $0 != sender } : []
+        return (members + Array(observers)).sorted { $0.raw < $1.raw }.map { Outgoing(to: $0, .note(note)) }
     }
 
     /// Takes an order back: everyone it was for, and observers, are told it no longer needs

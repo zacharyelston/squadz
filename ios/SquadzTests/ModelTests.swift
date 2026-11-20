@@ -180,6 +180,22 @@ final class ModelTests: XCTestCase {
         try await wait("Ben in") { ben.role == .member && ben.linkProblem == nil && ana.squad?.members.count == 2 }
         let benID = try XCTUnwrap(ben.me)
 
+        // Field notes are a chat: each sees the other's, under the name the leader knows them by.
+        XCTAssertFalse(ben.sendNote("   "))
+        XCTAssertTrue(ben.sendNote("At the gate"))
+        try await wait("the leader has Ben's note") { ana.notes.count == 1 }
+        XCTAssertEqual(ana.notes.first?.author, "Ben")
+        XCTAssertEqual(ana.unreadNotes, 1)
+        XCTAssertEqual(ben.unreadNotes, 0, "his own")
+        XCTAssertTrue(ana.sendNote("Hold there"))
+        try await wait("Ben has the leader's note") { ben.notes.count == 2 }
+        XCTAssertEqual(ben.notes.map(\.text), ["At the gate", "Hold there"])
+        XCTAssertEqual(ben.notes.map(ben.isMine), [true, false])
+        XCTAssertEqual(ana.notes.map(ana.isMine), [false, true])
+        XCTAssertEqual(ben.unreadNotes, 1)
+        ben.markNotesRead()
+        XCTAssertEqual(ben.unreadNotes, 0)
+
         // Not sent: a move-to with no place, a note with no words, and anything from a member.
         XCTAssertFalse(ana.sendOrder(.moveTo, text: "The oak"))
         XCTAssertFalse(ana.sendOrder(.note, text: "  "))

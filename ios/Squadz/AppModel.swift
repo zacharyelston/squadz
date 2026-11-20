@@ -76,6 +76,12 @@ final class AppModel {
     private(set) var orders: [Order] = []
     /// On the leader's device: each recipient's latest answer to each order.
     private(set) var answers: [UUID: [MemberID: OrderAck.Response]] = [:]
+    /// The squad's field notes, oldest first: a chat everyone in the squad reads and writes.
+    private(set) var notes: [FieldNote] = []
+    /// How many of them this device has shown.
+    private(set) var notesRead = 0
+    var unreadNotes: Int { max(0, notes.count - notesRead) }
+
     /// Called on a member's phone when an order it didn't have arrives: the app buzzes.
     var orderArrived: ((Order) -> Void)?
     /// On a member's phone: what it answered.
@@ -153,7 +159,7 @@ final class AppModel {
         guard role == .none else { return }
         if let saved = loadLeader(), let keys = try? keychain.leaderKeys(for: saved.squad.id) {
             lead(SquadCore(squad: saved.squad, mission: NoMission(), keys: keys, credentials: saved.credentials,
-                           epoch: saved.epoch, keyChanges: saved.keyChanges, revision: saved.revision, sharesPositions: true),
+                           epoch: saved.epoch, keyChanges: saved.keyChanges, revision: saved.revision, sharesPositions: true, sharesNotes: true),
                  me: saved.me, relay: saved.relay)
         } else if let id = defaults.string(forKey: "memberSquad").flatMap(UUID.init(uuidString:)),
                   let credential = try? keychain.credential(for: SquadID(id)) {
@@ -185,7 +191,7 @@ final class AppModel {
             return
         }
         let mine = Member(name: myName, device: device)
-        let core = SquadCore(squad: Squad(name: squadName, members: [mine]), mission: NoMission(), sharesPositions: true)
+        let core = SquadCore(squad: Squad(name: squadName, members: [mine]), mission: NoMission(), sharesPositions: true, sharesNotes: true)
         do {
             try keychain.save(core.keys, for: core.squadID)
         } catch {
@@ -297,6 +303,7 @@ final class AppModel {
         positions = core.positions
         orders = core.orders.reversed()
         answers = core.acks
+        notes = core.notes
         cancelledOrders = core.cancelled
         refreshLinks()
         if let latest = core.notices.last {
@@ -327,6 +334,42 @@ final class AppModel {
     func remove(_ member: MemberID) {
         guard member != me else { return }
         updateLeader { $0.removeMember(member, now: .now) }
+    }
+
+    // MARK: Field notes
+
+    /// Says something to the whole squad, with where this device is. False if there was nothing to say.
+    @discardableResult
+    func sendNote(_ text: String) -> Bool {
+        let words = String(text.trimmingCharacters(in: .whitespacesAndNewlines).prefix(FieldNote.maxText))
+        guard !words.isEmpty, let me else { return false }
+        let mine = positions[me]
+        let name = squad?.members.first { $0.id == me }?.name ?? defaults.string(forKey: "displayName") ?? ""
+        let note = FieldNote(author: name, time: .now, at: mine?.at, accuracy: mine?.accuracy, text: words)
+        switch role {
+        case .leader:
+            myNotes.insert(note.id)
+            updateLeader { $0.postNote(note) }
+        case .member:
+            // The leader's device passes it to everyone else, not back here.
+            notes.append(note)
+            myNotes.insert(note.id)
+            client?.send(.note(note))
+        case .none:
+            return false
+        }
+        notesRead = notes.count
+        return true
+    }
+
+    /// The notes this device wrote, to show them on its own side of the chat.
+    private var myNotes: Set<UUID> = []
+
+    func isMine(_ note: FieldNote) -> Bool { myNotes.contains(note.id) }
+
+    /// The notes tab is on screen: nothing is unread.
+    func markNotesRead() {
+        if notesRead != notes.count { notesRead = notes.count }
     }
 
     // MARK: Orders
@@ -549,6 +592,10 @@ final class AppModel {
             orderArrived?(o)
         case let .orderCancel(id):
             cancelledOrders.insert(id)
+        case let .note(n):
+            guard !notes.contains(where: { $0.id == n.id }) else { break }
+            notes.append(n)
+            notes.sort { $0.time < $1.time }
         default:
             break
         }
@@ -614,6 +661,9 @@ final class AppModel {
         answers = [:]
         myAnswers = [:]
         cancelledOrders = []
+        notes = []
+        notesRead = 0
+        myNotes = []
         links = [:]
         ticker?.cancel()
         ticker = nil

@@ -59,7 +59,7 @@ SquadKit writes keys in sorted order so the same message is always the same byte
 | `position` | `at`, `accuracy`, `time`, `heading`?, `member`? | `member` is ignored from a phone |
 | `orderAck` | `order`, `response` | `seen`, `done` or `cannot`. Counted only from someone the order was for |
 | `checkFire` | `id`, `by` | Anyone may call it. A repeated `id` is ignored |
-| `note` | `id`, `author`, `time`, `text`, `field`?, `at`?, `accuracy`?, `photo`? | Text up to 500 characters; an inline photo up to 300,000 bytes |
+| `note` | `id`, `author`, `time`, `text`, `field`?, `at`?, `accuracy`?, `photo`? | Text up to 500 characters; an inline photo up to 300,000 bytes. Also leader → member, when the squad shares notes (§5) |
 | `fileOffer` | `id`, `kind`, `group`, `name`, `size`, `sha256`, `field`? | `kind` is `capture` or `notePhoto`. A squad's leader ignores files; they are for hosts that store them |
 | `fileChunk` | `file`, `index`, `data` | Chunks of 262,144 bytes |
 | `fileDone` | `file` | |
@@ -105,6 +105,7 @@ SquadKit writes keys in sorted order so the same message is always the same byte
 - **`leave`**, and the leader removing a member: the member comes off the roster, its credential is revoked and its position forgotten. Everyone still linked gets a `notice`, then the new `status`. A device that only loses its link, or sends `bye`, stays on the roster.
 - **Check fire** raises the core's hold. Only the leader's own device lifts it; no message does.
 - **Holds** in a `status` are the core's and the mission's together. Nothing a mission or a message does removes a core hold.
+- **Notes.** The leader stamps a member's note with that member's name, keeps it, answers with a `receipt`, and passes it to observers. When the leader has turned on sharing notes, it also passes each note to every other member, sends its own notes to everyone, and sends a member who links the latest 50. A note with an `id` the leader already has is ignored.
 - **An order taken back** stays in the leader's record. Answers to it that arrive afterwards are ignored, and it is not sent again to a member who reconnects.
 - A message a member is not allowed to send (`welcome`, `status`, `order`, `orderCancel`, `notice`, and so on) is ignored.
 

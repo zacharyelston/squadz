@@ -68,6 +68,44 @@ final class SquadCoreTests: XCTestCase {
         XCTAssertTrue(y.host.squad.members.isEmpty)
     }
 
+    func testASquadThatSharesNotesIsAChatRoom() throws {
+        let y = Yard(mission: NoMission())
+        y.host.sharesNotes = true
+        y.join("Ana")
+        y.join("Ben")
+        func heard(_ who: String, _ text: String, from author: String) -> Bool {
+            y.has(who) { if case let .note(n) = $0 { return n.text == text && n.author == author }; return false }
+        }
+
+        // Ana's note reaches Ben, under the name the leader knows her by, and comes back to her only as a receipt.
+        let first = FieldNote(author: "Someone else", time: y.now, text: "At the gate")
+        y.send("Ana", .note(first))
+        XCTAssertTrue(heard("Ben", "At the gate", from: "Ana"))
+        XCTAssertFalse(heard("Ana", "At the gate", from: "Ana"))
+        XCTAssertTrue(y.has("Ana") { if case .receipt = $0 { return true }; return false })
+        // The same note again changes nothing.
+        y.send("Ana", .note(first))
+        XCTAssertEqual(y.host.notes.count, 1)
+
+        // The leader's own note reaches both.
+        y.command { core, now in core.postNote(FieldNote(author: "Lead", time: now, text: "Hold there")) }
+        XCTAssertTrue(heard("Ana", "Hold there", from: "Lead"))
+        XCTAssertTrue(heard("Ben", "Hold there", from: "Lead"))
+
+        // Someone who joins later reads up.
+        y.join("Cy")
+        XCTAssertTrue(heard("Cy", "At the gate", from: "Ana"))
+        XCTAssertTrue(heard("Cy", "Hold there", from: "Lead"))
+
+        // A squad that doesn't share notes keeps them with the leader.
+        let quiet = Yard(mission: NoMission())
+        quiet.join("Ana")
+        quiet.join("Ben")
+        quiet.send("Ana", .note(FieldNote(author: "Ana", time: quiet.now, text: "Just for the leader")))
+        XCTAssertEqual(quiet.host.notes.count, 1)
+        XCTAssertFalse(quiet.has("Ben") { if case .note = $0 { return true }; return false })
+    }
+
     func testTheLeaderTakesAnOrderBack() throws {
         let y = Yard(mission: NoMission())
         let ana = try XCTUnwrap(y.join("Ana"))
