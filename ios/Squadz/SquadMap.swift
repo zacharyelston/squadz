@@ -10,6 +10,8 @@ struct SquadMap: UIViewRepresentable {
     let now: Date
     /// Changes when the user asks to see everyone again.
     let recenter: Int
+    /// Which way this device points, to turn its own arrow. Nil without a compass.
+    var heading: Double?
     /// Places to mark: orders that are still open, and the one being written.
     var places: [Place] = []
     /// While set, a tap on the map picks a place instead of doing what a tap usually does.
@@ -42,6 +44,7 @@ struct SquadMap: UIViewRepresentable {
     func updateUIView(_ map: MKMapView, context: Context) {
         let c = context.coordinator
         c.onPick = onPick
+        c.heading = heading
         var marked = Set<UUID>()
         for place in places {
             marked.insert(place.id)
@@ -81,7 +84,7 @@ struct SquadMap: UIViewRepresentable {
             pin.title = l.member.name
             pin.isMe = l.isMe
             pin.isStale = l.isStale(now: now)
-            if let view = map.view(for: pin) as? MKMarkerAnnotationView { Coordinator.style(view, pin) }
+            if let view = map.view(for: pin) as? MKMarkerAnnotationView { c.style(view, pin, on: map) }
         }
         for (id, pin) in c.pins where !seen.contains(id) {
             map.removeAnnotation(pin)
@@ -144,12 +147,45 @@ struct SquadMap: UIViewRepresentable {
         var framed = 0
         var recenter = 0
 
-        static func style(_ view: MKMarkerAnnotationView, _ pin: MemberPin) {
+        var heading: Double?
+        /// The arrow as last drawn, so it is drawn again only when it has turned.
+        private var arrowDrawn: (degrees: Int, image: UIImage)?
+
+        /// This device's pin is an arrow that points the way the device does, whichever way up
+        /// the map is. Without a compass it is the plain location mark.
+        func style(_ view: MKMarkerAnnotationView, _ pin: MemberPin, on map: MKMapView) {
             view.markerTintColor = pin.isMe ? .systemBlue : .systemGreen
-            view.glyphImage = UIImage(systemName: pin.isMe ? "location.fill" : "person.fill")
+            if pin.isMe, let heading {
+                let degrees = Int((heading - map.camera.heading).rounded())
+                if arrowDrawn?.degrees != degrees, let arrow = Self.arrow(turned: Double(degrees)) {
+                    arrowDrawn = (degrees, arrow)
+                }
+                if view.glyphImage !== arrowDrawn?.image { view.glyphImage = arrowDrawn?.image }
+            } else {
+                view.glyphImage = UIImage(systemName: pin.isMe ? "location.fill" : "person.fill")
+            }
             view.alpha = pin.isStale ? 0.45 : 1
             view.titleVisibility = .visible
             view.displayPriority = .required
+        }
+
+        /// An arrow pointing up, turned clockwise by `degrees`.
+        static func arrow(turned degrees: Double) -> UIImage? {
+            guard let up = UIImage(systemName: "location.north.fill", withConfiguration: UIImage.SymbolConfiguration(pointSize: 18, weight: .bold)) else { return nil }
+            let side = max(up.size.width, up.size.height) * 1.3
+            let image = UIGraphicsImageRenderer(size: CGSize(width: side, height: side)).image { context in
+                context.cgContext.translateBy(x: side / 2, y: side / 2)
+                context.cgContext.rotate(by: degrees * .pi / 180)
+                up.draw(at: CGPoint(x: -up.size.width / 2, y: -up.size.height / 2))
+            }
+            return image.withRenderingMode(.alwaysTemplate)
+        }
+
+        /// The map was turned: the arrow has to turn against it.
+        func mapViewDidChangeVisibleRegion(_ mapView: MKMapView) {
+            guard heading != nil, let mine = pins.values.first(where: \.isMe),
+                  let view = mapView.view(for: mine) as? MKMarkerAnnotationView else { return }
+            style(view, mine, on: mapView)
         }
 
         func mapView(_ mapView: MKMapView, viewFor annotation: any MKAnnotation) -> MKAnnotationView? {
@@ -160,7 +196,7 @@ struct SquadMap: UIViewRepresentable {
             }
             guard let pin = annotation as? MemberPin else { return nil }
             let view = mapView.dequeueReusableAnnotationView(withIdentifier: "member", for: pin) as! MKMarkerAnnotationView
-            Self.style(view, pin)
+            style(view, pin, on: mapView)
             return view
         }
     }

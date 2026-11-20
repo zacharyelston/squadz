@@ -149,7 +149,7 @@ struct SquadView: View {
     }
 
     private func map(now: Date) -> some View {
-        SquadMap(located: model.located, now: now, recenter: recenter, places: places,
+        SquadMap(located: model.located, now: now, recenter: recenter, heading: model.heading, places: places,
                  onPick: picking ? { place in
                      draft.place = place
                      placing = false

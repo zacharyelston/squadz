@@ -95,6 +95,9 @@ final class AppModel {
     private let folder: URL
     private let service: SquadService
     private let location = LocationTracker()
+    private let compass = Compass()
+    /// Which way this device is pointing, for its own arrow on the map. Nil without a compass.
+    var heading: Double? { compass.heading }
     private var ticker: Task<Void, Never>?
 
     private var core: SquadCore<NoMission>?
@@ -668,6 +671,7 @@ final class AppModel {
         ticker?.cancel()
         ticker = nil
         location.stop()
+        compass.stop()
         client = nil
         host = nil
         relayHost = nil
@@ -687,6 +691,7 @@ final class AppModel {
     // MARK: Positions
 
     private func startReporting() {
+        compass.start()
         ticker?.cancel()
         ticker = Task { [weak self] in
             while !Task.isCancelled {
@@ -700,7 +705,9 @@ final class AppModel {
     private func report() {
         guard let me else { return }
         location.start()
-        guard let position = location.latest() else { return }
+        guard var position = location.latest() else { return }
+        // Which way the device points is known standing still; which way it is moving is not.
+        if let heading = compass.heading { position.heading = heading.rounded() }
         setMyPosition(position, member: me)
     }
 
