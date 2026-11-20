@@ -137,4 +137,4 @@ Zone definitions and event history survive a leader restart and are included in 
 
 Monitoring needs two fresh, distinct reports wholly across the accuracy margin (`max(3 m, accuracy)`). Initial positions, edits, reconnects and gaps longer than two minutes establish a baseline without claiming a crossing. A member who starts outside an allowed area has not been observed leaving it. GPS uncertainty, link loss and stale positions do not produce departure alerts. There is no background-monitoring guarantee: keep the squad apps open and connected for live alerts.
 
-The reusable geometry and map layers are in `BackyardBallistics/Packages/GeoZones`; check out BackyardBallistics next to this repository. SpudGunGolf's existing CoreGeo implementation is now the single shared source.
+The reusable geometry and map layers are in this repository's Swift package (`swift/Sources/CoreGeo`, `ZoneKit` and `ZoneMapKit`), so another app can use them by depending on it.

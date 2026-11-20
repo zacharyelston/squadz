@@ -6,8 +6,6 @@ options:
   createIntermediateGroups: true
 
 packages:
-  GeoZones:
-    path: ../../BackyardBallistics/Packages/GeoZones
   SquadKit:
     path: ../swift
 
@@ -24,11 +22,11 @@ targets:
         product: SquadKit
       - package: SquadKit
         product: SquadLink
-      - package: GeoZones
+      - package: SquadKit
         product: CoreGeo
-      - package: GeoZones
+      - package: SquadKit
         product: ZoneKit
-      - package: GeoZones
+      - package: SquadKit
         product: ZoneMapKit
     info:
       path: Squadz/Info.plist

@@ -85,3 +85,4 @@ Things the Squadz app needed that BackyardBallistics will find in the package wh
 - **Shared notes:** `SquadCore.sharesNotes` passes each note to the other members, as `sharesPositions` does for positions. It is off unless asked for, so golf's notes still go to the leader and the Theater only.
 - **`status.reportEvery`:** `core.setReportEvery(_:now:)` sets how often devices send positions. Golf's 15-second "no recent position" hold should stay above whatever rate it sets.
 - **Sealed links:** a link through a relay is sealed between the two devices ([`WIRE.md`](WIRE.md) §9). Nothing to do in an app; SquadLink does it.
+- **Zones and geometry:** `CoreGeo`, `ZoneKit` and `ZoneMapKit` are products of this package. SpudGunGolf can depend on this package for them instead of carrying its own copy; nothing in this repository depends on BackyardBallistics.
