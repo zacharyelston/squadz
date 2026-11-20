@@ -1,3 +1,4 @@
+import CoreGeo
 import Foundation
 import Network
 import Observation
@@ -69,6 +70,14 @@ final class AppModel {
     private(set) var relayNote: String?
     /// The latest thing the squad was told, like "Ana left the squad." Shown for a short while.
     private(set) var notice: Notice?
+
+    /// On the leader's device: the orders it sent, newest first. On a member's phone: the orders
+    /// that are for it, newest first.
+    private(set) var orders: [Order] = []
+    /// On the leader's device: each recipient's latest answer to each order.
+    private(set) var answers: [UUID: [MemberID: OrderAck.Response]] = [:]
+    /// On a member's phone: what it answered.
+    private(set) var myAnswers: [UUID: OrderAck.Response] = [:]
 
     let device: UUID
     private let defaults: UserDefaults
@@ -282,6 +291,8 @@ final class AppModel {
         relayHost?.setKeys(core.linkKeys(now: .now), invites: core.relayInvites(now: .now))
         squad = core.squad
         positions = core.positions
+        orders = core.orders.reversed()
+        answers = core.acks
         refreshLinks()
         if let latest = core.notices.last {
             tell(latest)
@@ -311,6 +322,51 @@ final class AppModel {
     func remove(_ member: MemberID) {
         guard member != me else { return }
         updateLeader { $0.removeMember(member, now: .now) }
+    }
+
+    // MARK: Orders
+
+    /// Sends an order to some members, or to everyone if `to` is empty. A move-to order needs a
+    /// place. False if it wasn't sent.
+    @discardableResult
+    func sendOrder(_ kind: Order.Kind, text: String, at place: GeoPoint? = nil, to: Set<MemberID> = []) -> Bool {
+        guard role == .leader, kind != .moveTo || place != nil else { return false }
+        let words = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard kind != .note || !words.isEmpty else { return false }
+        let before = core?.orders.count ?? 0
+        updateLeader { $0.sendOrder(kind, text: words, at: place, to: to.isEmpty ? nil : Array(to), now: .now) }
+        return (core?.orders.count ?? 0) > before
+    }
+
+    /// Who an order is for, without the leader, who gave it.
+    func recipients(of order: Order) -> [Member] {
+        (squad?.members ?? []).filter { order.isFor($0.id) && $0.id != leaderID }
+    }
+
+    /// True once everyone an order is for has answered done or can't, or has left.
+    func isSettled(_ order: Order) -> Bool {
+        switch role {
+        case .leader:
+            return recipients(of: order).allSatisfy { m in
+                let a = answers[order.id]?[m.id]
+                return a == .done || a == .cannot
+            }
+        case .member:
+            let a = myAnswers[order.id]
+            return a == .done || a == .cannot
+        case .none:
+            return true
+        }
+    }
+
+    /// Orders still to be carried out, newest first: for the map, and for a member's card.
+    var openOrders: [Order] { orders.filter { !isSettled($0) } }
+
+    /// A member's answer to an order.
+    func answer(_ order: Order, _ response: OrderAck.Response) {
+        guard role == .member, orders.contains(where: { $0.id == order.id }) else { return }
+        myAnswers[order.id] = response
+        client?.send(.orderAck(OrderAck(order: order.id, response: response)))
     }
 
     /// Ends the squad: everyone is cut off and nothing of it is kept.
@@ -429,6 +485,12 @@ final class AppModel {
         case let .notice(n):
             if let m = n.member { positions[m] = nil }
             tell(n)
+        case let .order(o):
+            // The leader's device sends an order again when this phone reconnects, until it is
+            // answered done or can't.
+            guard let me, o.isFor(me), !orders.contains(where: { $0.id == o.id }) else { break }
+            orders.insert(o, at: 0)
+            orders.sort { $0.time > $1.time }
         default:
             break
         }
@@ -490,6 +552,9 @@ final class AppModel {
 
     private func clear() {
         notice = nil
+        orders = []
+        answers = [:]
+        myAnswers = [:]
         links = [:]
         ticker?.cancel()
         ticker = nil

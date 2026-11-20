@@ -7,6 +7,10 @@ struct SquadView: View {
     @Environment(AppModel.self) private var model
     @State private var inviting = false
     @State private var choosingDetails = false
+    @State private var ordering = false
+    @State private var draft = OrderDraft()
+    /// The orders sheet is put away while the leader taps the map for a place.
+    @State private var pickingPlace = false
     @State private var confirmingLeave = false
     @State private var recenter = 0
     @Environment(\.horizontalSizeClass) private var sizeClass
@@ -31,6 +35,22 @@ struct SquadView: View {
                         .padding(8)
                         .background(.blue.opacity(0.15))
                 }
+                if pickingPlace {
+                    HStack {
+                        Label("Tap the map where you want them", systemImage: "hand.tap.fill")
+                            .font(.subheadline.weight(.semibold))
+                        Spacer()
+                        Button("Cancel") {
+                            pickingPlace = false
+                            ordering = true
+                        }
+                    }
+                    .padding(10)
+                    .background(.orange.opacity(0.25))
+                }
+                if !leading, let order = model.openOrders.first {
+                    OrderCard(order: order)
+                }
                 if let note = model.relayNote {
                     Label(note, systemImage: "antenna.radiowaves.left.and.right")
                         .font(.footnote)
@@ -40,7 +60,12 @@ struct SquadView: View {
                 }
                 TimelineView(.periodic(from: .now, by: 15)) { context in
                     VStack(spacing: 0) {
-                        SquadMap(located: model.located, now: context.date, recenter: recenter)
+                        SquadMap(located: model.located, now: context.date, recenter: recenter, places: places,
+                                 onPick: pickingPlace ? { place in
+                                     draft.place = place
+                                     pickingPlace = false
+                                     ordering = true
+                                 } : nil)
                             .overlay(alignment: .bottomTrailing) {
                                 Button("Show everyone", systemImage: "scope") { recenter += 1 }
                                     .labelStyle(.iconOnly)
@@ -63,6 +88,9 @@ struct SquadView: View {
                     Button("Squad settings", systemImage: "gearshape") { choosingDetails = true }
                 }
                 if leading {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("Orders", systemImage: "flag") { ordering = true }
+                    }
                     ToolbarItem(placement: .primaryAction) {
                         Button("Invite", systemImage: "qrcode") { inviting = true }
                     }
@@ -79,7 +107,26 @@ struct SquadView: View {
             }
             .sheet(isPresented: $inviting) { InviteView() }
             .sheet(isPresented: $choosingDetails) { SquadSettingsView(leading: leading) }
+            .sheet(isPresented: $ordering) {
+                OrdersView(draft: $draft) {
+                    ordering = false
+                    pickingPlace = true
+                }
+            }
         }
+    }
+}
+
+extension SquadView {
+    /// Open orders that have a place, and the place of the order being written.
+    var places: [SquadMap.Place] {
+        var out = model.openOrders.compactMap { order in
+            order.at.map { SquadMap.Place(id: order.id, title: order.title, at: $0) }
+        }
+        if leading, let place = draft.place, draft.kind == .moveTo, ordering || pickingPlace {
+            out.append(SquadMap.Place(id: OrderDraft.pinID, title: "New order", at: place, isDraft: true))
+        }
+        return out
     }
 }
 

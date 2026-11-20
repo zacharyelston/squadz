@@ -167,6 +167,57 @@ final class ModelTests: XCTestCase {
         ana.endSquad()
     }
 
+    func testTheLeaderSendsAMemberSomewhereAndHearsBack() async throws {
+        let ana = model("Ana"), ben = model("Ben")
+        ana.startSquad(name: "Red", as: "Ana")
+        try await wait("the leader's link") { ana.hostPort != nil }
+        point(to: ana, ben)
+        ana.openJoining()
+        let shown = try XCTUnwrap(ana.invite).url(scheme: "squadz").absoluteString
+        try await wait("listener with invite key") { ana.hostIsListening }
+        ben.offer(shown)
+        ben.join(try XCTUnwrap(ben.offered), as: "Ben")
+        try await wait("Ben in") { ben.role == .member && ben.linkProblem == nil && ana.squad?.members.count == 2 }
+        let benID = try XCTUnwrap(ben.me)
+
+        // Not sent: a move-to with no place, a note with no words, and anything from a member.
+        XCTAssertFalse(ana.sendOrder(.moveTo, text: "The oak"))
+        XCTAssertFalse(ana.sendOrder(.note, text: "  "))
+        XCTAssertFalse(ben.sendOrder(.holdPosition, text: ""))
+        XCTAssertTrue(ana.orders.isEmpty)
+
+        let oak = GeoPoint(latitude: 42.361, longitude: -71.061)
+        XCTAssertTrue(ana.sendOrder(.moveTo, text: "The oak", at: oak, to: [benID]))
+        try await wait("Ben has the order") { ben.orders.count == 1 }
+        let order = try XCTUnwrap(ben.orders.first)
+        XCTAssertEqual(order.title, "Move to")
+        XCTAssertEqual(order.at, oak)
+        XCTAssertEqual(ben.openOrders.map(\.id), [order.id])
+        XCTAssertEqual(ana.recipients(of: order).map(\.name), ["Ben"], "the leader isn't asked to answer its own order")
+        XCTAssertEqual(OrdersView.answers(to: order, from: ana.recipients(of: order), given: ana.answers[order.id] ?? [:]), "Ben: no answer yet")
+        XCTAssertFalse(ana.isSettled(order))
+
+        // Seen keeps it open on both; Done settles it on both.
+        ben.answer(order, .seen)
+        try await wait("the leader sees Seen") { ana.answers[order.id]?[benID] == .seen }
+        XCTAssertEqual(ben.openOrders.count, 1)
+        XCTAssertEqual(ana.openOrders.count, 1)
+        ben.answer(order, .done)
+        try await wait("the leader sees Done") { ana.answers[order.id]?[benID] == .done }
+        XCTAssertTrue(ben.openOrders.isEmpty)
+        XCTAssertTrue(ana.openOrders.isEmpty)
+        XCTAssertEqual(OrdersView.answers(to: order, from: ana.recipients(of: order), given: ana.answers[order.id] ?? [:]), "Ben: Done")
+
+        // To the whole squad, newest first on both.
+        XCTAssertTrue(ana.sendOrder(.note, text: "Back by five"))
+        try await wait("Ben has the note") { ben.orders.count == 2 }
+        XCTAssertEqual(ben.orders.first?.text, "Back by five")
+        XCTAssertEqual(ana.orders.first?.text, "Back by five")
+        ben.answer(try XCTUnwrap(ben.orders.first), .cannot)
+        try await wait("the leader sees Can't") { ana.openOrders.isEmpty }
+        ana.endSquad()
+    }
+
     func testALeaderPicksUpItsSquadAfterARestart() async throws {
         let ana = model("Ana"), ben = model("Ben")
         ana.startSquad(name: "Red", as: "Ana")
