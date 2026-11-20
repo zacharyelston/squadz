@@ -59,6 +59,12 @@ struct SquadMap: UIViewRepresentable {
             map.removeAnnotation(pin)
             c.places[id] = nil
         }
+        // A flag that has just been put down somewhere the map isn't showing: zoom out to it.
+        let flags = Set(places.filter { !$0.isDraft }.map(\.id))
+        let outOfView = flags.subtracting(c.flagsShown).contains { id in
+            c.places[id].map { !map.visibleMapRect.contains(MKMapPoint($0.coordinate)) } ?? false
+        }
+        c.flagsShown = flags
         var seen = Set<MemberID>()
         for l in located {
             guard let position = l.position else { continue }
@@ -81,15 +87,16 @@ struct SquadMap: UIViewRepresentable {
         }
 
         // Frame everyone when someone new shows up, and on request.
-        if !c.pins.isEmpty, c.framed != c.pins.count || c.recenter != recenter {
-            let asked = c.recenter != recenter
+        let everything = c.pins.values.map(\.coordinate) + c.places.values.filter { !$0.isDraft }.map(\.coordinate)
+        if !everything.isEmpty, c.framed != c.pins.count || c.recenter != recenter || outOfView {
+            let asked = c.recenter != recenter || outOfView
             c.framed = c.pins.count
-            if c.pins.count == 1, let only = c.pins.values.first {
-                map.setRegion(MKCoordinateRegion(center: only.coordinate, latitudinalMeters: 1500, longitudinalMeters: 1500), animated: asked)
+            if everything.count == 1, let only = everything.first {
+                map.setRegion(MKCoordinateRegion(center: only, latitudinalMeters: 1500, longitudinalMeters: 1500), animated: asked)
             } else {
-                // Room around the outermost pins for their markers and names.
-                let rect = c.pins.values.reduce(MKMapRect.null) {
-                    $0.union(MKMapRect(origin: MKMapPoint($1.coordinate), size: MKMapSize(width: 0, height: 0)))
+                // Room around the outermost pins and flags for their markers and names.
+                let rect = everything.reduce(MKMapRect.null) {
+                    $0.union(MKMapRect(origin: MKMapPoint($1), size: MKMapSize(width: 0, height: 0)))
                 }
                 map.setVisibleMapRect(rect, edgePadding: UIEdgeInsets(top: 80, left: 60, bottom: 60, right: 60), animated: asked)
             }
@@ -113,6 +120,8 @@ struct SquadMap: UIViewRepresentable {
     final class Coordinator: NSObject, MKMapViewDelegate {
         var pins: [MemberID: MemberPin] = [:]
         var places: [UUID: PlacePin] = [:]
+        /// The orders' flags on the map at the last update, to tell a new one.
+        var flagsShown: Set<UUID> = []
         var onPick: ((GeoPoint) -> Void)?
 
         @objc func tapped(_ tap: UITapGestureRecognizer) {

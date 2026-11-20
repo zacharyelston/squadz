@@ -362,6 +362,9 @@ final class AppModel {
     /// Orders still to be carried out, newest first: for the map, and for a member's card.
     var openOrders: [Order] { orders.filter { !isSettled($0) } }
 
+    /// The same orders in the order they came, oldest first: what to do next is first.
+    var queue: [Order] { openOrders.reversed() }
+
     /// A member's answer to an order.
     func answer(_ order: Order, _ response: OrderAck.Response) {
         guard role == .member, orders.contains(where: { $0.id == order.id }) else { return }

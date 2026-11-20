@@ -194,7 +194,7 @@ final class ModelTests: XCTestCase {
         XCTAssertEqual(order.at, oak)
         XCTAssertEqual(ben.openOrders.map(\.id), [order.id])
         XCTAssertEqual(ana.recipients(of: order).map(\.name), ["Ben"], "the leader isn't asked to answer its own order")
-        XCTAssertEqual(OrdersView.answers(to: order, from: ana.recipients(of: order), given: ana.answers[order.id] ?? [:]), "Ben: no answer yet")
+        XCTAssertEqual(OrdersPanel.answers(to: order, from: ana.recipients(of: order), given: ana.answers[order.id] ?? [:]), "Ben: no answer yet")
         XCTAssertFalse(ana.isSettled(order))
 
         // Seen keeps it open on both; Done settles it on both.
@@ -206,14 +206,22 @@ final class ModelTests: XCTestCase {
         try await wait("the leader sees Done") { ana.answers[order.id]?[benID] == .done }
         XCTAssertTrue(ben.openOrders.isEmpty)
         XCTAssertTrue(ana.openOrders.isEmpty)
-        XCTAssertEqual(OrdersView.answers(to: order, from: ana.recipients(of: order), given: ana.answers[order.id] ?? [:]), "Ben: Done")
+        XCTAssertEqual(OrdersPanel.answers(to: order, from: ana.recipients(of: order), given: ana.answers[order.id] ?? [:]), "Ben: Done")
 
         // To the whole squad, newest first on both.
         XCTAssertTrue(ana.sendOrder(.note, text: "Back by five"))
         try await wait("Ben has the note") { ben.orders.count == 2 }
         XCTAssertEqual(ben.orders.first?.text, "Back by five")
         XCTAssertEqual(ana.orders.first?.text, "Back by five")
-        ben.answer(try XCTUnwrap(ben.orders.first), .cannot)
+        // Two more wait in the order they came: the oldest is the one to do next.
+        XCTAssertTrue(ana.sendOrder(.holdPosition, text: "By the gate"))
+        try await wait("Ben has three") { ben.orders.count == 3 }
+        XCTAssertEqual(ben.queue.map(\.text), ["Back by five", "By the gate"])
+        ben.answer(try XCTUnwrap(ben.queue.first), .done)
+        XCTAssertEqual(ben.queue.map(\.text), ["By the gate"])
+        ben.answer(try XCTUnwrap(ben.queue.first), .cannot)
+        XCTAssertTrue(ben.queue.isEmpty)
+        XCTAssertEqual(ben.orders.count, 3, "answered orders stay in the list")
         try await wait("the leader sees Can't") { ana.openOrders.isEmpty }
         ana.endSquad()
     }

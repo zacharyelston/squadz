@@ -2,81 +2,37 @@ import CoreGeo
 import SquadKit
 import SwiftUI
 
-/// The squad on a map, with the member list underneath.
+/// The squad on a map. The leader's device has a panel beside the map (under it on a phone) for
+/// the team and for orders. A member's phone has the map and the team on one tab and its orders
+/// on another.
 struct SquadView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.horizontalSizeClass) private var sizeClass
     @State private var inviting = false
     @State private var choosingDetails = false
-    @State private var ordering = false
-    @State private var draft = OrderDraft()
-    /// The orders sheet is put away while the leader taps the map for a place.
-    @State private var pickingPlace = false
     @State private var confirmingLeave = false
     @State private var recenter = 0
-    @Environment(\.horizontalSizeClass) private var sizeClass
+    @State private var panel = LeaderPanel.Tab.team
+    @State private var draft = OrderDraft()
+    /// The next tap on the map says where the order being written is for.
+    @State private var placing = false
+    @State private var memberTab = MemberTab.map
+    /// The team list (on the leader's device, the whole panel) can be put away to give the map
+    /// the screen. Kept across launches.
+    @AppStorage("showsList") private var showsList = true
+
+    enum MemberTab { case map, orders }
 
     private var leading: Bool { model.role == .leader }
     private var squadName: String { model.squad?.name ?? "this squad" }
+    private var wide: Bool { sizeClass == .regular }
+    /// A tap on the map sets the place only while the leader is writing a move-to order.
+    private var picking: Bool { leading && showsList && panel == .orders && draft.needsPlace && placing }
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 0) {
-                if let problem = model.linkProblem {
-                    Label(problem, systemImage: "wifi.exclamationmark")
-                        .font(.footnote)
-                        .frame(maxWidth: .infinity)
-                        .padding(8)
-                        .background(.yellow.opacity(0.3))
-                }
-                if let notice = model.notice {
-                    Label(notice.text, systemImage: "person.fill.xmark")
-                        .font(.footnote)
-                        .frame(maxWidth: .infinity)
-                        .padding(8)
-                        .background(.blue.opacity(0.15))
-                }
-                if pickingPlace {
-                    HStack {
-                        Label("Tap the map where you want them", systemImage: "hand.tap.fill")
-                            .font(.subheadline.weight(.semibold))
-                        Spacer()
-                        Button("Cancel") {
-                            pickingPlace = false
-                            ordering = true
-                        }
-                    }
-                    .padding(10)
-                    .background(.orange.opacity(0.25))
-                }
-                if !leading, let order = model.openOrders.first {
-                    OrderCard(order: order)
-                }
-                if let note = model.relayNote {
-                    Label(note, systemImage: "antenna.radiowaves.left.and.right")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity)
-                        .padding(6)
-                }
-                TimelineView(.periodic(from: .now, by: 15)) { context in
-                    VStack(spacing: 0) {
-                        SquadMap(located: model.located, now: context.date, recenter: recenter, places: places,
-                                 onPick: pickingPlace ? { place in
-                                     draft.place = place
-                                     pickingPlace = false
-                                     ordering = true
-                                 } : nil)
-                            .overlay(alignment: .bottomTrailing) {
-                                Button("Show everyone", systemImage: "scope") { recenter += 1 }
-                                    .labelStyle(.iconOnly)
-                                    .padding(10)
-                                    .background(.regularMaterial, in: .circle)
-                                    .padding()
-                            }
-                        MemberList(now: context.date)
-                            .frame(maxHeight: sizeClass == .regular ? 360 : 240)
-                    }
-                }
+            Group {
+                if leading { leaderScreen } else { memberScreen }
             }
             .navigationTitle(model.squad?.name ?? "")
             .navigationBarTitleDisplayMode(.inline)
@@ -88,9 +44,6 @@ struct SquadView: View {
                     Button("Squad settings", systemImage: "gearshape") { choosingDetails = true }
                 }
                 if leading {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button("Orders", systemImage: "flag") { ordering = true }
-                    }
                     ToolbarItem(placement: .primaryAction) {
                         Button("Invite", systemImage: "qrcode") { inviting = true }
                     }
@@ -107,26 +60,163 @@ struct SquadView: View {
             }
             .sheet(isPresented: $inviting) { InviteView() }
             .sheet(isPresented: $choosingDetails) { SquadSettingsView(leading: leading) }
-            .sheet(isPresented: $ordering) {
-                OrdersView(draft: $draft) {
-                    ordering = false
-                    pickingPlace = true
+        }
+    }
+
+    // MARK: The leader's device
+
+    private var leaderScreen: some View {
+        VStack(spacing: 0) {
+            banners
+            TimelineView(.periodic(from: .now, by: 15)) { context in
+                let layout = wide ? AnyLayout(HStackLayout(spacing: 0)) : AnyLayout(VStackLayout(spacing: 0))
+                layout {
+                    map(now: context.date)
+                    if showsList {
+                        if wide { Divider() }
+                        LeaderPanel(tab: $panel, draft: $draft, placing: $placing, now: context.date)
+                            .frame(width: wide ? 400 : nil)
+                            .frame(maxHeight: wide ? .infinity : 390)
+                    }
                 }
             }
         }
     }
-}
 
-extension SquadView {
+    // MARK: A member's phone
+
+    private var memberScreen: some View {
+        TabView(selection: $memberTab) {
+            VStack(spacing: 0) {
+                banners
+                if let next = model.queue.first {
+                    Button { memberTab = .orders } label: { NextOrderLine(order: next, waiting: model.queue.count) }
+                        .buttonStyle(.plain)
+                }
+                TimelineView(.periodic(from: .now, by: 15)) { context in
+                    VStack(spacing: 0) {
+                        map(now: context.date)
+                        if showsList {
+                            MemberList(now: context.date)
+                                .frame(maxHeight: wide ? 360 : 240)
+                        }
+                    }
+                }
+            }
+            .tabItem { Label("Map", systemImage: "map") }
+            .tag(MemberTab.map)
+
+            MemberOrdersView()
+                .tabItem { Label("Orders", systemImage: "flag") }
+                .tag(MemberTab.orders)
+                .badge(model.queue.count)
+        }
+    }
+
+    // MARK: Shared
+
+    @ViewBuilder private var banners: some View {
+        if let problem = model.linkProblem {
+            Label(problem, systemImage: "wifi.exclamationmark")
+                .font(.footnote)
+                .frame(maxWidth: .infinity)
+                .padding(8)
+                .background(.yellow.opacity(0.3))
+        }
+        if let notice = model.notice {
+            Label(notice.text, systemImage: "person.fill.xmark")
+                .font(.footnote)
+                .frame(maxWidth: .infinity)
+                .padding(8)
+                .background(.blue.opacity(0.15))
+        }
+        if let note = model.relayNote {
+            Label(note, systemImage: "antenna.radiowaves.left.and.right")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity)
+                .padding(6)
+        }
+    }
+
+    private func map(now: Date) -> some View {
+        SquadMap(located: model.located, now: now, recenter: recenter, places: places,
+                 onPick: picking ? { place in
+                     draft.place = place
+                     placing = false
+                 } : nil)
+            .overlay(alignment: .top) {
+                if picking {
+                    Label("Tap the map where you want them", systemImage: "hand.tap.fill")
+                        .font(.subheadline.weight(.semibold))
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 8)
+                        .background(.orange, in: .capsule)
+                        .foregroundStyle(.white)
+                        .padding(.top, 10)
+                }
+            }
+            .overlay(alignment: .bottomTrailing) {
+                VStack(spacing: 10) {
+                    Button(showsList ? "Hide the list" : "Show the list", systemImage: showsList ? "rectangle.expand.vertical" : "list.bullet") {
+                        withAnimation { showsList.toggle() }
+                    }
+                    Button("Show everyone", systemImage: "scope") { recenter += 1 }
+                }
+                .labelStyle(.iconOnly)
+                .buttonStyle(MapButtonStyle())
+                .padding()
+            }
+    }
+
     /// Open orders that have a place, and the place of the order being written.
-    var places: [SquadMap.Place] {
+    private var places: [SquadMap.Place] {
         var out = model.openOrders.compactMap { order in
             order.at.map { SquadMap.Place(id: order.id, title: order.title, at: $0) }
         }
-        if leading, let place = draft.place, draft.kind == .moveTo, ordering || pickingPlace {
+        if leading, showsList, panel == .orders, draft.needsPlace, let place = draft.place {
             out.append(SquadMap.Place(id: OrderDraft.pinID, title: "New order", at: place, isDraft: true))
         }
         return out
+    }
+}
+
+/// A round button that sits on the map.
+struct MapButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .frame(width: 22, height: 22)
+            .padding(10)
+            .background(.regularMaterial, in: .circle)
+            .opacity(configuration.isPressed ? 0.6 : 1)
+    }
+}
+
+/// Beside the leader's map: the team, or orders.
+struct LeaderPanel: View {
+    enum Tab: Hashable { case team, orders }
+
+    @Environment(AppModel.self) private var model
+    @Binding var tab: Tab
+    @Binding var draft: OrderDraft
+    @Binding var placing: Bool
+    let now: Date
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Picker("Panel", selection: $tab) {
+                Text("Team").tag(Tab.team)
+                Text(model.openOrders.isEmpty ? "Orders" : "Orders (\(model.openOrders.count) open)").tag(Tab.orders)
+            }
+            .pickerStyle(.segmented)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            switch tab {
+            case .team: MemberList(now: now)
+            case .orders: OrdersPanel(draft: $draft, placing: $placing)
+            }
+        }
+        .background(Color(.systemBackground))
     }
 }
 
