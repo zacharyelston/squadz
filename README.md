@@ -1,104 +1,55 @@
-# Squadz - GPS Squad Tracking
+# Squadz
 
-Real-time GPS location sharing for squads/teams. Built on omni-core patterns.
+The home of any squad: a core that every app can use, with missions as add-ons.
 
-## Features
+A squad is a leader's device and its members' phones. Members share positions, get orders, send notes and can call check fire; the leader's device runs the squad and decides everything. What the squad is out doing (a round of golf, a search, a ski tour) is a **mission**, added on top without changing the core.
 
-- **Create Squads** - Start a squad and get a 6-character join code
-- **Join Squads** - Enter a join code to join an existing squad
-- **Real-time Location** - Share your GPS location with squad members
-- **Interactive Map** - See all squad members on a Leaflet map
-- **Stale Detection** - Visual indication when a member's location is outdated
+The plan is [issue #2](https://github.com/zacharyelston/squadz/issues/2). This is steps V1 and V2 of it.
 
-## Architecture
+| Part | Where | Status |
+| --- | --- | --- |
+| **SquadKit**: the squad protocol and the leader's state. Join, roster, positions, orders, notes, files, check fire, holds, missions. No network code | [`swift/Sources/SquadKit`](swift/Sources/SquadKit) | Built and tested |
+| **SquadLink**: SquadKit over the local network (Bonjour, TLS keyed from the join code) | [`swift/Sources/SquadLink`](swift/Sources/SquadLink) | Built; tested on one Mac's loopback only |
+| **CoreGeo**: GPS points and small-area geometry | [`swift/Sources/CoreGeo`](swift/Sources/CoreGeo) | Built |
+| The wire format, for implementations in other languages | [`docs/WIRE.md`](docs/WIRE.md), [`testdata/wire`](testdata/wire) | Written, with vectors |
+| Join by QR, member credentials | | Not started (V2b) |
+| A Squadz phone app | | Not started |
+| Relay for squads over the internet | | Not started (V3) |
 
+SquadKit and SquadLink come from GroupKit and GroupLink in [BackyardBallistics](https://github.com/zacharyelston/BackyardBallistics), with golf taken out. BackyardBallistics does not use this package yet; [`docs/BACKYARDBALLISTICS.md`](docs/BACKYARDBALLISTICS.md) lists what it has to change to do so.
+
+## Using it
+
+```swift
+import SquadKit
+import SquadLink
+
+// The leader's device.
+var squad = SquadCore(squad: Squad(name: "Red"), mission: NoMission(), joinCode: JoinCode.make())
+let host = try SquadLinkHost(name: "Red", joinCode: squad.joinCode)
+host.onMessage = { message, peer in host.send(squad.handle(message, from: peer, now: Date())) }
+host.onPeerClosed = { squad.peerClosed($0) }
+host.start()
+
+// A member's phone.
+let client = SquadLinkClient(squadName: "Red", joinCode: code,
+                             hello: Hello(name: "Ana", device: deviceID, joinCode: code))
+client.onMessage = { message in /* .welcome, .status, .order, ... */ }
+client.start()
+client.send(.position(MemberPosition(at: here, accuracy: 5, time: Date())))
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                      Frontend (Next.js)                      │
-│                         Port 3000                            │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐  │
-│  │ CreateSquad │  │  JoinSquad  │  │      SquadMap       │  │
-│  └─────────────┘  └─────────────┘  │  (Leaflet + React)  │  │
-│                                     └─────────────────────┘  │
-└─────────────────────────────────────────────────────────────┘
-                              │
-                              │ HTTP REST API
-                              ▼
-┌─────────────────────────────────────────────────────────────┐
-│                    Backend (Rust/Axum)                       │
-│                         Port 8080                            │
-│  ┌─────────────────┐  ┌─────────────────────────────────┐   │
-│  │  SquadManager   │  │       LocationStore             │   │
-│  │  - create/join  │  │  - update/query locations       │   │
-│  │  - leave/delete │  │  - TTL-based stale detection    │   │
-│  └─────────────────┘  └─────────────────────────────────┘   │
-└─────────────────────────────────────────────────────────────┘
-```
 
-## API Endpoints
+A mission is a type that conforms to `Mission`; see [`Mission.swift`](swift/Sources/SquadKit/Mission.swift) and the `RallyMission` in the tests.
 
-### Health
-- `GET /api/v1/health` - Health check
+## Rules that don't change
 
-### Squads
-- `POST /api/v1/squads` - Create a new squad
-- `GET /api/v1/squads` - List all squads
-- `GET /api/v1/squads/:id` - Get squad details
-- `DELETE /api/v1/squads/:id` - Delete a squad (leader only)
-- `POST /api/v1/squads/:id/join` - Join a squad
-- `POST /api/v1/squads/:id/leave` - Leave a squad
+- The leader's device is the authority. Nothing else runs a squad or decides anything.
+- Holds only add. The core unions its holds with the mission's; nothing a mission or a message does can lift a core hold. A fuzz test pins it.
+- A message's sender is the link it arrived on, never a field in the message.
+- No secrets, hostnames, team IDs or account details in the source.
 
-### Locations
-- `POST /api/v1/locations` - Update member location
-- `GET /api/v1/squads/:id/locations` - Get all squad member locations
-
-## Development
-
-### Backend
+## Tests
 
 ```bash
-cd backend
-cargo run
+cd swift && swift test
 ```
-
-### Frontend
-
-```bash
-cd frontend
-npm install
-npm run dev
-```
-
-### Docker
-
-```bash
-docker-compose up --build
-```
-
-## Configuration
-
-### Backend Environment Variables
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| HOST | 0.0.0.0 | Server bind address |
-| PORT | 8080 | Server port |
-| LOCATION_TTL_SECS | 300 | Location staleness threshold (5 min) |
-| MAX_SQUAD_SIZE | 50 | Maximum members per squad |
-
-### Frontend Environment Variables
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| NEXT_PUBLIC_API_URL | http://localhost:8080 | Backend API URL |
-
-## Tech Stack
-
-- **Backend**: Rust, Axum, Tokio
-- **Frontend**: Next.js 14, React 18, TypeScript, Tailwind CSS
-- **Map**: Leaflet, react-leaflet
-- **Patterns**: Based on omni-core architecture
-
-## License
-
-MIT
