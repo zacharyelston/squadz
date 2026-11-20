@@ -1,3 +1,4 @@
+import CoreGeo
 import SquadKit
 import SwiftUI
 
@@ -7,6 +8,7 @@ struct SquadView: View {
     @State private var inviting = false
     @State private var confirmingLeave = false
     @State private var recenter = 0
+    @Environment(\.horizontalSizeClass) private var sizeClass
 
     private var leading: Bool { model.role == .leader }
     private var squadName: String { model.squad?.name ?? "this squad" }
@@ -46,7 +48,7 @@ struct SquadView: View {
                                     .padding()
                             }
                         MemberList(now: context.date)
-                            .frame(maxHeight: 220)
+                            .frame(maxHeight: sizeClass == .regular ? 360 : 240)
                     }
                 }
             }
@@ -81,15 +83,24 @@ struct MemberList: View {
     let now: Date
 
     var body: some View {
+        let mine = model.located.first { $0.isMe }?.position?.at
         List(model.located) { located in
-            HStack {
-                Text(located.member.name)
-                if located.isMe { Text("you").foregroundStyle(.secondary) }
-                if located.isLeader {
-                    Image(systemName: "star.fill").foregroundStyle(.yellow).accessibilityLabel("Leader")
+            VStack(alignment: .leading, spacing: 3) {
+                HStack {
+                    Text(located.member.name)
+                    if located.isMe { Text("you").foregroundStyle(.secondary) }
+                    if located.isLeader {
+                        Image(systemName: "star.fill").foregroundStyle(.yellow).accessibilityLabel("Leader")
+                    }
+                    Spacer()
+                    Text(Self.status(located, now: now)).foregroundStyle(.secondary)
                 }
-                Spacer()
-                Text(Self.status(located, now: now)).foregroundStyle(.secondary)
+                let details = Self.details(located, from: mine)
+                if !details.isEmpty {
+                    Text(details.joined(separator: " · "))
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
             }
             .opacity(located.isStale(now: now) ? 0.5 : 1)
             .swipeActions {
@@ -99,6 +110,42 @@ struct MemberList: View {
             }
         }
         .listStyle(.plain)
+    }
+
+    /// What else is known about a member, most useful first: how they are linked (on the leader's
+    /// device), how far and which way from this device, how good the fix is, where, and when
+    /// they joined.
+    static func details(_ located: Located, from mine: GeoPoint?) -> [String] {
+        var out: [String] = []
+        switch located.link {
+        case .direct: out.append("Connected")
+        case .relay: out.append("Connected through the relay")
+        case .away: out.append("Not connected")
+        case nil: break
+        }
+        if let p = located.position {
+            if !located.isMe, let mine {
+                out.append("\(length(Geo.distance(mine, p.at))) \(compass(Geo.bearing(from: mine, to: p.at))) of you")
+            }
+            out.append("±\(length(p.accuracy))")
+            out.append(String(format: "%.5f, %.5f", p.at.latitude, p.at.longitude))
+        }
+        if let joined = located.joined {
+            out.append("joined \(joined.formatted(date: .omitted, time: .shortened))")
+        }
+        return out
+    }
+
+    /// In the units this device's region uses.
+    static func length(_ metres: Double) -> String {
+        Measurement(value: max(0, metres), unit: UnitLength.meters).formatted(.measurement(width: .abbreviated, usage: .road))
+    }
+
+    /// One of eight points, from degrees clockwise from north.
+    static func compass(_ bearing: Double) -> String {
+        let points = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"]
+        let turned = (bearing.truncatingRemainder(dividingBy: 360) + 360).truncatingRemainder(dividingBy: 360)
+        return points[Int((turned + 22.5) / 45) % 8]
     }
 
     static func status(_ located: Located, now: Date) -> String {

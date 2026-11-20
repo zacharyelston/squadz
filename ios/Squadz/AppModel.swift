@@ -4,12 +4,23 @@ import Observation
 import SquadKit
 import SquadLink
 
+/// How a member's device is linked to the leader's, as the leader's device sees it.
+enum MemberLink: Equatable {
+    case direct
+    case relay
+    case away
+}
+
 /// A member and where they were last seen, for the map and the list.
 struct Located: Identifiable, Equatable {
     var member: Member
     var position: MemberPosition?
     var isMe: Bool
     var isLeader: Bool
+    /// Known only on the leader's device, and not for the leader.
+    var link: MemberLink? = nil
+    /// When they joined. Known only on the leader's device.
+    var joined: Date? = nil
     var id: MemberID { member.id }
 
     /// A position older than this is shown dimmed.
@@ -103,9 +114,23 @@ final class AppModel {
     // MARK: Who's where
 
     var located: [Located] {
-        (squad?.members ?? []).map {
-            Located(member: $0, position: positions[$0.id], isMe: $0.id == me, isLeader: $0.id == leaderID)
+        (squad?.members ?? []).map { m in
+            let others = role == .leader && m.id != me
+            return Located(member: m, position: positions[m.id], isMe: m.id == me, isLeader: m.id == leaderID,
+                           link: others ? (links[m.id] ?? .away) : nil,
+                           joined: others ? core?.credentials.first { $0.member == m.id && !$0.revoked }?.issued : nil)
         }
+    }
+
+    /// On the leader's device: which members are linked right now, and how.
+    private var links: [MemberID: MemberLink] = [:]
+
+    private func refreshLinks() {
+        var now: [MemberID: MemberLink] = [:]
+        for (peer, member) in core?.peers ?? [:] {
+            now[member] = relayHost?.connections[peer] != nil ? .relay : .direct
+        }
+        if now != links { links = now }
     }
 
     // MARK: Launch
@@ -170,7 +195,7 @@ final class AppModel {
                     self?.updateLeader { $0.handle(message, from: peer, now: .now) }
                 }
             }
-            host.onPeerClosed = { [weak self] peer in MainActor.assumeIsolated { self?.core?.peerClosed(peer) } }
+            host.onPeerClosed = { [weak self] peer in MainActor.assumeIsolated { self?.core?.peerClosed(peer); self?.refreshLinks() } }
             host.onFailed = { [weak self] _ in MainActor.assumeIsolated { self?.linkProblem = "Restarting the squad's link…" } }
             host.onReady = { [weak self] _ in MainActor.assumeIsolated { self?.linkProblem = nil } }
             do {
@@ -210,7 +235,7 @@ final class AppModel {
                 self?.updateLeader { $0.handle(message, from: peer, now: .now) }
             }
         }
-        room.onPeerClosed = { [weak self] peer in MainActor.assumeIsolated { self?.core?.peerClosed(peer) } }
+        room.onPeerClosed = { [weak self] peer in MainActor.assumeIsolated { self?.core?.peerClosed(peer); self?.refreshLinks() } }
         room.onToken = { [weak self] token in MainActor.assumeIsolated { try? self?.keychain.save(relayToken: token, for: id) } }
         room.onStatus = { [weak self] status in
             MainActor.assumeIsolated {
@@ -257,6 +282,7 @@ final class AppModel {
         relayHost?.setKeys(core.linkKeys(now: .now), invites: core.relayInvites(now: .now))
         squad = core.squad
         positions = core.positions
+        refreshLinks()
         if let latest = core.notices.last {
             tell(latest)
         }
@@ -464,6 +490,7 @@ final class AppModel {
 
     private func clear() {
         notice = nil
+        links = [:]
         ticker?.cancel()
         ticker = nil
         location.stop()

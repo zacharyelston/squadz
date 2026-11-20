@@ -211,4 +211,27 @@ final class ModelTests: XCTestCase {
         XCTAssertNil(ben.offered)
         XCTAssertEqual(ben.alert, "This invite has expired. Ask for a new one.")
     }
+
+    func testAMembersDetailLine() {
+        XCTAssertEqual([0, 44, 46, 90, 181, 270, 337, 338, -45].map(MemberList.compass), ["N", "NE", "NE", "E", "S", "W", "NW", "N", "NW"])
+
+        let here = GeoPoint(latitude: 44.05, longitude: -121.31)
+        let ana = Member(id: MemberID(), name: "Ana", device: UUID(), role: .member)
+        let position = MemberPosition(at: Geo.destination(here, bearing: 90, distance: 500), accuracy: 5, time: .now)
+        let joined = Date(timeIntervalSince1970: 1_800_000_000)
+
+        // On the leader's device: the link first, then where, then when she joined.
+        let seen = MemberList.details(Located(member: ana, position: position, isMe: false, isLeader: false, link: .relay, joined: joined), from: here)
+        XCTAssertEqual(seen.count, 5, "\(seen)")
+        XCTAssertEqual(seen.first, "Connected through the relay")
+        XCTAssertTrue(seen[1].hasSuffix(" E of you"), seen[1])
+        XCTAssertTrue(seen[2].hasPrefix("±"), seen[2])
+        XCTAssertEqual(seen[3], String(format: "%.5f, %.5f", position.at.latitude, position.at.longitude))
+        XCTAssertTrue(seen[4].hasPrefix("joined "), seen[4])
+
+        // On a member's phone the link and the joining time aren't known, and nobody is a distance from themselves.
+        XCTAssertEqual(MemberList.details(Located(member: ana, position: position, isMe: true, isLeader: false), from: position.at).count, 2)
+        XCTAssertEqual(MemberList.details(Located(member: ana, position: nil, isMe: false, isLeader: false, link: .away), from: here), ["Not connected"])
+        XCTAssertEqual(MemberList.details(Located(member: ana, position: nil, isMe: false, isLeader: false), from: nil), [])
+    }
 }
