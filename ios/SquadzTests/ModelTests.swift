@@ -233,5 +233,15 @@ final class ModelTests: XCTestCase {
         XCTAssertEqual(MemberList.details(Located(member: ana, position: position, isMe: true, isLeader: false), from: position.at).count, 2)
         XCTAssertEqual(MemberList.details(Located(member: ana, position: nil, isMe: false, isLeader: false, link: .away), from: here), ["Not connected"])
         XCTAssertEqual(MemberList.details(Located(member: ana, position: nil, isMe: false, isLeader: false), from: nil), [])
+
+        // The leader chooses which of these the list shows.
+        let all = Located(member: ana, position: position, isMe: false, isLeader: false, link: .direct, joined: joined)
+        XCTAssertEqual(MemberList.details(all, from: here, showing: [.link]), ["Connected"])
+        XCTAssertEqual(MemberList.details(all, from: here, showing: [.coordinates, .link]).count, 2)
+        XCTAssertEqual(MemberList.details(all, from: here, showing: []), [])
+        XCTAssertEqual(MemberDetail.chosen(MemberDetail.everything), Set(MemberDetail.allCases))
+        XCTAssertEqual(MemberDetail.stored([.joined, .link]), "link,joined")
+        XCTAssertEqual(MemberDetail.chosen("link,nonsense,,joined"), [.link, .joined])
+        XCTAssertEqual(MemberDetail.chosen(""), [])
     }
 }

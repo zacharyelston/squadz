@@ -6,6 +6,7 @@ import SwiftUI
 struct SquadView: View {
     @Environment(AppModel.self) private var model
     @State private var inviting = false
+    @State private var choosingDetails = false
     @State private var confirmingLeave = false
     @State private var recenter = 0
     @Environment(\.horizontalSizeClass) private var sizeClass
@@ -59,6 +60,9 @@ struct SquadView: View {
                     Button(leading ? "End" : "Leave", role: .destructive) { confirmingLeave = true }
                 }
                 if leading {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("Squad settings", systemImage: "gearshape") { choosingDetails = true }
+                    }
                     ToolbarItem(placement: .primaryAction) {
                         Button("Invite", systemImage: "qrcode") { inviting = true }
                     }
@@ -74,12 +78,83 @@ struct SquadView: View {
                 Text(leading ? "Everyone is disconnected and has to join a new squad." : "You'll need a new invite to come back.")
             }
             .sheet(isPresented: $inviting) { InviteView() }
+            .sheet(isPresented: $choosingDetails) { SquadSettingsView() }
+        }
+    }
+}
+
+/// One thing the list can say about a member, under their name.
+enum MemberDetail: String, CaseIterable, Identifiable {
+    case link, distance, accuracy, coordinates, joined
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .link: "Connection"
+        case .distance: "Distance and direction from you"
+        case .accuracy: "Accuracy of their position"
+        case .coordinates: "Coordinates"
+        case .joined: "When they joined"
+        }
+    }
+
+    /// What the leader has chosen to show, kept as the names joined by commas. Everything, until
+    /// they choose.
+    static let storageKey = "memberDetails"
+    static let everything = allCases.map(\.rawValue).joined(separator: ",")
+
+    static func chosen(_ stored: String) -> Set<MemberDetail> {
+        Set(stored.split(separator: ",").compactMap { MemberDetail(rawValue: String($0)) })
+    }
+
+    static func stored(_ chosen: Set<MemberDetail>) -> String {
+        allCases.filter(chosen.contains).map(\.rawValue).joined(separator: ",")
+    }
+}
+
+/// The leader's settings for the squad screen: which details the member list shows.
+struct SquadSettingsView: View {
+    @Environment(\.dismiss) private var dismiss
+    @AppStorage(MemberDetail.storageKey) private var stored = MemberDetail.everything
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    ForEach(MemberDetail.allCases) { detail in
+                        let on = MemberDetail.chosen(stored).contains(detail)
+                        Button {
+                            var chosen = MemberDetail.chosen(stored)
+                            if on { chosen.remove(detail) } else { chosen.insert(detail) }
+                            stored = MemberDetail.stored(chosen)
+                        } label: {
+                            HStack {
+                                Text(detail.title).foregroundStyle(.primary)
+                                Spacer()
+                                if on { Image(systemName: "checkmark").foregroundStyle(.tint) }
+                            }
+                        }
+                        .accessibilityAddTraits(on ? .isSelected : [])
+                    }
+                } header: {
+                    Text("Show under each member")
+                } footer: {
+                    Text("This changes the list on this device only. Members' phones show what they know: distance, accuracy and coordinates.")
+                }
+            }
+            .navigationTitle("Squad settings")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
+            }
         }
     }
 }
 
 struct MemberList: View {
     @Environment(AppModel.self) private var model
+    @AppStorage(MemberDetail.storageKey) private var stored = MemberDetail.everything
     let now: Date
 
     var body: some View {
@@ -95,7 +170,8 @@ struct MemberList: View {
                     Spacer()
                     Text(Self.status(located, now: now)).foregroundStyle(.secondary)
                 }
-                let details = Self.details(located, from: mine)
+                // The choice is the leader's; a member's phone shows what it has.
+                let details = Self.details(located, from: mine, showing: model.role == .leader ? MemberDetail.chosen(stored) : Set(MemberDetail.allCases))
                 if !details.isEmpty {
                     Text(details.joined(separator: " · "))
                         .font(.footnote)
@@ -115,22 +191,24 @@ struct MemberList: View {
     /// What else is known about a member, most useful first: how they are linked (on the leader's
     /// device), how far and which way from this device, how good the fix is, where, and when
     /// they joined.
-    static func details(_ located: Located, from mine: GeoPoint?) -> [String] {
+    static func details(_ located: Located, from mine: GeoPoint?, showing: Set<MemberDetail> = Set(MemberDetail.allCases)) -> [String] {
         var out: [String] = []
-        switch located.link {
-        case .direct: out.append("Connected")
-        case .relay: out.append("Connected through the relay")
-        case .away: out.append("Not connected")
-        case nil: break
+        if showing.contains(.link) {
+            switch located.link {
+            case .direct: out.append("Connected")
+            case .relay: out.append("Connected through the relay")
+            case .away: out.append("Not connected")
+            case nil: break
+            }
         }
         if let p = located.position {
-            if !located.isMe, let mine {
+            if showing.contains(.distance), !located.isMe, let mine {
                 out.append("\(length(Geo.distance(mine, p.at))) \(compass(Geo.bearing(from: mine, to: p.at))) of you")
             }
-            out.append("±\(length(p.accuracy))")
-            out.append(String(format: "%.5f, %.5f", p.at.latitude, p.at.longitude))
+            if showing.contains(.accuracy) { out.append("±\(length(p.accuracy))") }
+            if showing.contains(.coordinates) { out.append(String(format: "%.5f, %.5f", p.at.latitude, p.at.longitude)) }
         }
-        if let joined = located.joined {
+        if showing.contains(.joined), let joined = located.joined {
             out.append("joined \(joined.formatted(date: .omitted, time: .shortened))")
         }
         return out
