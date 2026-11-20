@@ -48,6 +48,41 @@ final class ModelTests: XCTestCase {
         }
     }
 
+    func testLeaderCanSeeAndRemoveAReadOnlyObserver() async throws {
+        let leader = model("Leader")
+        leader.startSquad(name: "Theater test", as: "Leader")
+        defer { leader.endSquad() }
+        try await wait("leader listening") { leader.hostPort != nil }
+        leader.openJoining()
+        try await wait("invite listener") { leader.hostIsListening }
+        let endpoint = NWEndpoint.hostPort(host: "127.0.0.1", port: NWEndpoint.Port(rawValue: try XCTUnwrap(leader.hostPort))!)
+        let enroller = SquadEnroller(invite: try XCTUnwrap(leader.invite), name: "Theater desk", device: UUID(), role: .observer)
+        enroller.fixedEndpoint = endpoint
+        var credential: MemberCredential?
+        enroller.onDone = { result in if case let .success(value) = result { credential = value } }
+        enroller.start()
+        defer { enroller.cancel() }
+        try await wait("observer credential") { credential != nil }
+        let client = SquadLinkClient(credential: try XCTUnwrap(credential), name: "Theater desk", device: UUID())
+        client.fixedEndpoint = endpoint
+        var refused = false
+        client.onStatus = { if case .stopped = $0 { refused = true } }
+        client.start()
+        defer { client.stop() }
+        try await wait("visible watcher") { leader.watchingObservers.first?.connected == true }
+        XCTAssertEqual(leader.watchingObservers.first?.name, "Theater desk")
+        XCTAssertEqual(leader.squad?.members.count, 1, "An observer is separate from squad members")
+        client.send(.note(FieldNote(author: "Theater", time: .now, text: "Should be ignored")))
+        client.send(.checkFire(CheckFire(by: "Theater")))
+        var gotLeaderNote = false
+        client.onMessage = { if case let .note(note) = $0.body, note.text == "Observation only" { gotLeaderNote = true } }
+        XCTAssertTrue(leader.sendNote("Observation only"))
+        try await wait("observer receives leader note") { gotLeaderNote }
+        XCTAssertEqual(leader.notes.map(\.text), ["Observation only"])
+        leader.removeObserver(try XCTUnwrap(leader.watchingObservers.first))
+        try await wait("watcher removed") { leader.watchingObservers.isEmpty && refused }
+    }
+
     func testZoneDefinitionsAndAlertsSyncAndSurviveLeaderRestart() async throws {
         let leader = model("Leader"), member = model("Ben")
         leader.startSquad(name: "Zones", as: "Leader")

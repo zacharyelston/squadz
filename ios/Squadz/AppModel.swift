@@ -261,6 +261,7 @@ final class AppModel {
     /// Orders the leader took back.
     private(set) var cancelledOrders: Set<UUID> = []
 
+    private(set) var watchingObservers: [SquadObserver] = []
     private(set) var zones: [SquadZone] = []
     private(set) var zoneEvents: [ZoneEvent] = []
     private(set) var zoneAlert: ZoneEvent?
@@ -406,7 +407,7 @@ final class AppModel {
                     self?.updateLeader { $0.handle(message, from: peer, now: .now) }
                 }
             }
-            host.onPeerClosed = { [weak self] peer in MainActor.assumeIsolated { self?.core?.peerClosed(peer); self?.refreshLinks() } }
+            host.onPeerClosed = { [weak self] peer in MainActor.assumeIsolated { self?.updateLeader { $0.peerClosed(peer) } } }
             host.onFailed = { [weak self] _ in MainActor.assumeIsolated { self?.linkProblem = "Restarting the squad's link…" } }
             host.onReady = { [weak self] _ in MainActor.assumeIsolated { self?.linkProblem = nil } }
             do {
@@ -462,7 +463,7 @@ final class AppModel {
                 self?.updateLeader { $0.handle(message, from: peer, now: .now) }
             }
         }
-        room.onPeerClosed = { [weak self] peer in MainActor.assumeIsolated { self?.core?.peerClosed(peer); self?.refreshLinks() } }
+        room.onPeerClosed = { [weak self] peer in MainActor.assumeIsolated { self?.updateLeader { $0.peerClosed(peer) } } }
         room.onToken = { [weak self] token in MainActor.assumeIsolated { try? self?.keychain.save(relayToken: token, for: id) } }
         room.onStatus = { [weak self] status in
             MainActor.assumeIsolated {
@@ -520,6 +521,7 @@ final class AppModel {
         log(logger.changes(in: core, streams: live, now: .now))
         notes = core.notes
         cancelledOrders = core.cancelled
+        watchingObservers = core.observerRoster
         receiveZones(core.zones, events: core.zoneEvents, announce: true)
         refreshLinks()
         if let latest = core.notices.last {
@@ -550,6 +552,11 @@ final class AppModel {
     func remove(_ member: MemberID) {
         guard member != me else { return }
         updateLeader { $0.removeMember(member, now: .now) }
+    }
+
+    func removeObserver(_ observer: SquadObserver) {
+        guard role == .leader, let id = Data(hex: observer.id) else { return }
+        updateLeader { $0.revoke(credential: id, now: .now) }
     }
 
     /// The leader sets how often every device in the squad sends its position.
@@ -859,6 +866,7 @@ final class AppModel {
         case let .status(s):
             show(s.squad)
             follow(s.reportEvery)
+            watchingObservers = s.observers ?? []
             receiveZones(s.zones ?? [], events: s.zoneEvents ?? [], announce: receivedZoneSnapshot)
             receivedZoneSnapshot = true
             if let video = VideoMission.status(in: s) {
@@ -949,6 +957,7 @@ final class AppModel {
 
     private func clear() {
         notice = nil
+        watchingObservers = []
         zones = []
         zoneEvents = []
         zoneAlert = nil

@@ -74,7 +74,7 @@ SquadKit writes keys in sorted order so the same message is always the same byte
 | `welcome` | `member`, `squad` | The answer to `hello` on a member's credential link. The same credential is always the same `member` |
 | `observing` | a squad | The answer to `hello` on an observer's credential link |
 | `refused` | `reason` | Wrong version, an invite that is closed, a credential that was revoked, or not a role this host takes. The leader closes the link and the client stops trying |
-| `status` | `revision`, `squad`, `holds`, `missions`, `reportEvery`? | Sent to everyone whenever the squad changes. `reportEvery` is how often the leader wants each device's `position`, in seconds, from 1 to 600; a device follows it from the next report on. Absent, the device uses its own default (10 in Squadz) |
+| `status` | `revision`, `squad`, `holds`, `missions`, `reportEvery`?, `observers`?, `observerState`? | Sent to everyone whenever the squad changes. `reportEvery` is how often the leader wants each device's `position`, in seconds, from 1 to 600; a device follows it from the next report on. Absent, the device uses its own default (10 in Squadz) |
 | `order` | `id`, `kind`, `text`, `time`, `at`?, `to`? | No `to` means the whole squad. Text up to 140 characters |
 | `orderCancel` | `order` | The leader took that order back: it no longer needs doing or answering. Sent to everyone the order was for and to observers, and again to a member who was away, when it reconnects |
 | `receipt` | `id`, `status`, `detail` | What happened to a note or file: `received`, `stored` or `refused` |
@@ -101,7 +101,7 @@ SquadKit writes keys in sorted order so the same message is always the same byte
 - **`hello` on an invite link** (§7): checks `v`, the role, and that the invite is still open. The leader adds a new member (or notes a new observer), answers `enrolled` and closes the link. Every join is a new member whatever `device` says: a device ID proves nothing.
 - **`hello` on a credential link:** the member and the role come from the credential, not from the `hello`. The leader sends any `leaderKey` changes, then `welcome`, then any orders for that member that are neither `done` nor `cannot` (the latest ten), then `status` to everyone.
 - **A link that proved no key**, or a credential that was revoked, gets `refused`.
-- **An observer** gets `observing`, the mission's welcome payloads, a `status`, and the positions already known. After that it gets every `status`, `positions`, `order` and `note`. Nothing an observer sends has any effect, except `bye`.
+- **An observer** gets `observing`, the mission's welcome payloads, the latest 100 orders and their cancellations, the latest 50 notes, a `status`, and the positions already known. After that it gets every `status`, `positions`, `order` and `note`. Nothing an observer sends has any effect, except `bye`.
 - **`leave`**, and the leader removing a member: the member comes off the roster, its credential is revoked and its position forgotten. Everyone still linked gets a `notice`, then the new `status`. A device that only loses its link, or sends `bye`, stays on the roster.
 - **Check fire** raises the core's hold. Only the leader's own device lifts it; no message does.
 - **Holds** in a `status` are the core's and the mission's together. Nothing a mission or a message does removes a core hold.
@@ -268,3 +268,9 @@ The typed code is never used on a sealed link.
 A zone contains `id` (UUID), `name` (1–40 trimmed characters), `rule` (`goal` or `allowedArea`), `shape`, and optional `members` (member IDs; omitted means the whole squad). Shapes use Swift's tagged Codable representation: `{"circle":{"center":{"latitude":42.36,"longitude":-71.06},"radius":100}}` or `{"polygon":{"vertices":[...]}}`. Coordinates and radii are validated before committing a zone.
 
 An event contains `id`, `zone`, `zoneName`, `member`, `memberName`, `kind` (`arrived` or `left`) and `time`. The leader evaluates authenticated member reports; a claimed member in a position payload is overwritten by the link identity. Event UUIDs deduplicate alerts. The first status snapshot is historical and does not trigger member notification banners. Zone state never changes order acknowledgements.
+
+### Optional observer status fields
+
+`status.observers` lists issued, unrevoked observers in the current credential epoch. Each entry has `id` (public credential ID in hex, never its secret), `name`, `joined`, and `connected`. Observers occupy no member slot. This list is sent to members as well as observers, so the leader can disclose and revoke watchers. Hosts should send the outgoing messages returned by `peerClosed` to update presence on disconnect.
+
+Only statuses addressed to observer links include `observerState`: `connections` is an array of `{member, connected}` and `answers` is an array of `{order, member, response}`. These report current member connections and acknowledgements for retained orders, including personal orders. Ordinary members do not receive this telemetry. Legacy clients ignore these optional fields; absent fields mean that the leader does not supply this information. Observer enrollment, connection, disconnection, revocation and member presence changes publish updated status; an acknowledgement also publishes an observer-only status. The protocol version is unchanged.

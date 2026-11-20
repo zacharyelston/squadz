@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Squadz Theater</title>
+    <link rel="icon" href="/app-icon.png" />
+    <link rel="stylesheet" href="/theater.css" />
+    <script src="/theater.js" defer></script>
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="/"
+        ><img src="/app-icon.png" alt="" width="42" height="42" /><span
+          >Squadz <strong>Theater</strong></span
+        ></a
+      >
+      <div class="top-right">
+        <span class="observer-label">READ ONLY</span
+        ><span id="link-state" role="status">Connecting to host…</span>
+      </div>
+    </header>
+    <div class="shell">
+      <nav id="navigation" aria-label="Squad views"></nav>
+      <main id="main"></main>
+    </div>
+    <div id="toast" role="status" aria-live="polite"></div>
+  </body>
+</html>

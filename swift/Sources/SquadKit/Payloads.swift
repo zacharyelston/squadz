@@ -334,7 +334,9 @@ public struct SquadStatus: Codable, Equatable, Sendable {
     /// Optional for older clients; zone-capable leaders always send an array, even when empty.
     public var zones: [SquadZone]?
     public var zoneEvents: [ZoneEvent]?
-    public init(revision: Int, squad: Squad, holds: [Hold], missions: [MissionStatus] = [], reportEvery: Int? = nil, zones: [SquadZone]? = nil, zoneEvents: [ZoneEvent]? = nil) {
+    public var observers: [SquadObserver]?
+    public var observerState: ObserverTelemetry?
+    public init(revision: Int, squad: Squad, holds: [Hold], missions: [MissionStatus] = [], reportEvery: Int? = nil, zones: [SquadZone]? = nil, zoneEvents: [ZoneEvent]? = nil, observers: [SquadObserver]? = nil, observerState: ObserverTelemetry? = nil) {
         self.revision = revision
         self.squad = squad
         self.holds = holds
@@ -342,6 +344,8 @@ public struct SquadStatus: Codable, Equatable, Sendable {
         self.reportEvery = reportEvery
         self.zones = zones
         self.zoneEvents = zoneEvents
+        self.observers = observers
+        self.observerState = observerState
     }
 
     /// The fastest and slowest a leader may ask for, in seconds.
