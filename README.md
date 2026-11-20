@@ -16,7 +16,7 @@ The plan is [issue #2](https://github.com/zacharyelston/squadz/issues/2). This i
 | The wire format, for implementations in other languages | [`docs/WIRE.md`](docs/WIRE.md), [`testdata/wire`](testdata/wire) | Written, with vectors |
 | Join by QR, member credentials, the leader's identity key | SquadKit (`Credentials.swift`, `Invite.swift`), SquadLink, [`testdata/join`](testdata/join) | Built and tested. The app shows and scans the code; scanning was tried on a real iPhone |
 | **Squadz for iPhone and iPad**: lead or join a squad, see everyone on a map, send orders, share notes | [`ios/`](ios), [`docs/APP.md`](docs/APP.md) | Run on a real iPhone and iPad on one Wi-Fi network, and in the simulator. Not yet tried through the relay on real devices, or over cellular |
-| **Relay**: carries a squad's links over the internet. Rust | [`relay/`](relay), [`docs/RELAY.md`](docs/RELAY.md) | Built and tested on one Mac and on a second machine on the same network. Not yet run on the internet. It can't read what it carries: links through it are sealed between the two devices |
+| **Relay**: carries a squad's links over the internet. Rust | [`relay/`](relay), [`docs/RELAY.md`](docs/RELAY.md) | Built and tested on one Mac and on a second machine on the same network. Not yet run on the internet. It can't read what it carries: links through it are sealed between the two devices. [`deploy/openmanet`](deploy/openmanet) puts it on a mesh node; not yet tried on one |
 
 SquadKit and SquadLink come from GroupKit and GroupLink in [BackyardBallistics](https://github.com/zacharyelston/BackyardBallistics), with golf taken out. BackyardBallistics does not use this package yet; [`docs/BACKYARDBALLISTICS.md`](docs/BACKYARDBALLISTICS.md) lists what it has to change to do so.
 
@@ -125,4 +125,4 @@ cd swift && swift test
 cd ios && xcodegen generate && xcodebuild -project Squadz.xcodeproj -scheme Squadz -destination 'platform=iOS Simulator,name=iPhone 18 Pro' test
 ```
 
-The Swift tests that go through a relay start the one just built, and are skipped if it isn't there. As of this writing: 12 relay tests, 68 package tests and 8 app tests.
+The Swift tests that go through a relay start the one just built, and are skipped if it isn't there. As of this writing: 13 relay tests, 68 package tests and 8 app tests.
