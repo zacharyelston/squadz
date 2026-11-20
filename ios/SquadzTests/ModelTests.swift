@@ -1,3 +1,4 @@
+import CoreLocation
 import CoreGeo
 import Network
 import SquadKit
@@ -46,6 +47,72 @@ final class ModelTests: XCTestCase {
         }
     }
 
+    func testFailedEnrollmentSaveKeepsLastRosterAndAllowsRetry() async throws {
+        let leader = model("Leader"), member = model("Member")
+        leader.startSquad(name: "Red", as: "Leader")
+        try await wait("leader listening") { leader.hostPort != nil }
+        leader.openJoining()
+        let invite = try XCTUnwrap(leader.invite)
+        try await wait("listener with invite key") { leader.hostIsListening }
+        let folder = made[0].2
+        let backup = folder.appendingPathExtension("backup")
+        let files = FileManager.default
+        try files.moveItem(at: folder, to: backup)
+        defer { try? files.removeItem(at: backup) }
+        try Data().write(to: folder) // A file in place of the parent directory makes writes fail.
+        point(to: leader, member)
+        member.join(invite, as: "Member")
+        try await wait("leader reporting the write failure") { leader.alert != nil }
+        XCTAssertEqual(leader.squad?.members.count, 1)
+        XCTAssertEqual(member.role, .none)
+        try files.removeItem(at: folder)
+        try files.moveItem(at: backup, to: folder)
+        let saved = folder.appendingPathComponent("leading.json")
+        XCTAssertEqual(try JSONDecoder().decode(LeaderSaved.self, from: Data(contentsOf: saved)).squad.members.count, 1)
+
+        try await wait("member receiving refusal") { !member.joining && member.alert != nil }
+        XCTAssertEqual(member.role, .none)
+        member.join(invite, as: "Member")
+        try await wait("durable enrollment") { member.role == .member && leader.squad?.members.count == 2 }
+        XCTAssertEqual(try JSONDecoder().decode(LeaderSaved.self, from: Data(contentsOf: saved)).squad, leader.squad)
+        leader.endSquad()
+    }
+
+    func testLocationStreamCanRestartAfterErrorAndCompletion() async throws {
+        var runs = 0
+        let fix = CLLocation(latitude: 10, longitude: 20)
+        let tracker = LocationTracker { receive in
+            runs += 1
+            receive(fix)
+            if runs == 1 { throw CancellationError() }
+        }
+        for expected in 1...3 {
+            tracker.start()
+            try await wait("location stream run") { runs == expected }
+            XCTAssertEqual(tracker.latest(now: .distantFuture)?.time, fix.timestamp)
+        }
+        tracker.stop()
+    }
+
+    func testStoppedLocationStreamCannotClearReplacement() async throws {
+        var pending: [CheckedContinuation<Void, Never>] = []
+        let tracker = LocationTracker { _ in
+            await withCheckedContinuation { pending.append($0) }
+        }
+        tracker.start()
+        try await wait("first stream") { pending.count == 1 }
+        tracker.stop()
+        tracker.start()
+        try await wait("replacement stream") { pending.count == 2 }
+        pending[0].resume()
+        await Task.yield()
+        tracker.start()
+        await Task.yield()
+        XCTAssertEqual(pending.count, 2)
+        tracker.stop()
+        for continuation in pending.dropFirst() { continuation.resume() }
+    }
+
     func testLeadJoinSeeEachOtherRemove() async throws {
         let ana = model("Ana"), ben = model("Ben")
         ana.startSquad(name: "Red", as: "Ana")
@@ -56,7 +123,7 @@ final class ModelTests: XCTestCase {
         // Ben reads the invite the way a scan delivers it: as text. Nothing joins yet.
         ana.openJoining()
         let shown = try XCTUnwrap(ana.invite).url(scheme: "squadz").absoluteString
-        try await Task.sleep(for: .milliseconds(300))   // the link takes the invite's key
+        try await wait("listener with invite key") { ana.hostIsListening }
         ben.offer(shown)
         let offered = try XCTUnwrap(ben.offered)
         XCTAssertEqual(offered.name, "Red")
@@ -106,7 +173,7 @@ final class ModelTests: XCTestCase {
         try await wait("the leader's link") { ana.hostPort != nil }
         point(to: ana, ben)
         ana.openJoining()
-        try await Task.sleep(for: .milliseconds(300))
+        try await wait("listener with invite key") { ana.hostIsListening }
         ben.offer(try XCTUnwrap(ana.invite).url(scheme: "squadz").absoluteString)
         ben.join(try XCTUnwrap(ben.offered), as: "Ben")
         try await wait("Ben in") { ben.linkProblem == nil && ben.squad?.members.count == 2 }

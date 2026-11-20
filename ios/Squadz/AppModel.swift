@@ -66,6 +66,7 @@ final class AppModel {
     private var ticker: Task<Void, Never>?
 
     private var core: SquadCore<NoMission>?
+    private var lastSaved: LeaderSaved?
     private var host: SquadLinkHost?
     private var relayHost: RelayLinkHost?
     private var client: SquadLinkClient?
@@ -95,6 +96,7 @@ final class AppModel {
 
     private let advertise: Bool
     var hostPort: UInt16? { host?.port }
+    var hostIsListening: Bool { host?.isListening == true }
 
     // MARK: Who's where
 
@@ -151,6 +153,7 @@ final class AppModel {
             return
         }
         lead(core, me: mine.id, relay: relay.address)
+        if role != .leader { try? keychain.removeLeaderKeys(for: core.squadID) }
     }
 
     private func lead(_ core: SquadCore<NoMission>, me: MemberID, relay: RelayAddress?) {
@@ -162,13 +165,18 @@ final class AppModel {
             }
             host.onMessage = { [weak self] message, peer in
                 MainActor.assumeIsolated {
-                    guard let self, let out = self.core?.handle(message, from: peer, now: .now) else { return }
-                    self.sent(out)
+                    self?.updateLeader { $0.handle(message, from: peer, now: .now) }
                 }
             }
             host.onPeerClosed = { [weak self] peer in MainActor.assumeIsolated { self?.core?.peerClosed(peer) } }
             host.onFailed = { [weak self] _ in MainActor.assumeIsolated { self?.linkProblem = "Restarting the squad's link…" } }
             host.onReady = { [weak self] _ in MainActor.assumeIsolated { self?.linkProblem = nil } }
+            do {
+                try saveLeader(core, me: me, relay: relay)
+            } catch {
+                alert = "Couldn't save this squad on this phone. Check available storage and try again."
+                return
+            }
             self.core = core
             self.host = host
             self.me = me
@@ -197,8 +205,7 @@ final class AppModel {
         }
         room.onMessage = { [weak self] message, peer in
             MainActor.assumeIsolated {
-                guard let self, let out = self.core?.handle(message, from: peer, now: .now) else { return }
-                self.sent(out)
+                self?.updateLeader { $0.handle(message, from: peer, now: .now) }
             }
         }
         room.onPeerClosed = { [weak self] peer in MainActor.assumeIsolated { self?.core?.peerClosed(peer) } }
@@ -218,8 +225,28 @@ final class AppModel {
         room.start()
     }
 
-    /// After anything the core did: send what it asked, tell the link who may connect now, show
-    /// the new state, and save it.
+    /// A reply can hand a member their credential. Keep the state it depends on
+    /// before sending it or installing the new link keys.
+    private func updateLeader(_ change: (inout SquadCore<NoMission>) -> [Outgoing]) {
+        guard var next = core, let me else { return }
+        let out = change(&next)
+        do {
+            try saveLeader(next, me: me, relay: leadingRelay)
+        } catch {
+            for reply in out {
+                if case .enrolled = reply.body {
+                    let refusal = [Outgoing(to: reply.to, .refused("The leader couldn't save your membership. Try joining again."), thenClose: true)]
+                    host?.send(refusal)
+                    relayHost?.send(refusal)
+                }
+            }
+            alert = "Couldn't save the squad change. Check available storage and try again."
+            return
+        }
+        core = next
+        sent(out)
+    }
+
     private func sent(_ out: [Outgoing]) {
         guard let core, let host else { return }
         host.send(out)
@@ -231,7 +258,6 @@ final class AppModel {
         if let invite, invite.isExpired(now: .now) || !core.invitations.contains(where: { $0.secret == invite.enrol }) {
             self.invite = nil
         }
-        saveLeader()
     }
 
     /// Opens joining and returns the invite to show. Anyone who scans it before it expires joins.
@@ -252,8 +278,8 @@ final class AppModel {
     }
 
     func remove(_ member: MemberID) {
-        guard member != me, let out = core?.removeMember(member, now: .now) else { return }
-        sent(out)
+        guard member != me else { return }
+        updateLeader { $0.removeMember(member, now: .now) }
     }
 
     /// Ends the squad: everyone is cut off and nothing of it is kept.
@@ -277,12 +303,13 @@ final class AppModel {
 
     private var leaderFile: URL { folder.appendingPathComponent("leading.json") }
 
-    private func saveLeader() {
-        guard let core, let me else { return }
+    private func saveLeader(_ core: SquadCore<NoMission>, me: MemberID, relay: RelayAddress?) throws {
         let saved = LeaderSaved(squad: core.squad, me: me, credentials: core.credentials, epoch: core.epoch,
-                                keyChanges: core.keyChanges, revision: core.revision, relay: leadingRelay)
-        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        try? JSONEncoder().encode(saved).write(to: leaderFile, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+                                keyChanges: core.keyChanges, revision: core.revision, relay: relay)
+        guard saved != lastSaved else { return }
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try JSONEncoder().encode(saved).write(to: leaderFile, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+        lastSaved = saved
     }
 
     private func loadLeader() -> LeaderSaved? {
@@ -423,6 +450,7 @@ final class AppModel {
         leadingRelay = nil
         relayNote = nil
         core = nil
+        lastSaved = nil
         role = .none
         squad = nil
         me = nil
@@ -435,7 +463,6 @@ final class AppModel {
     // MARK: Positions
 
     private func startReporting() {
-        location.start()
         ticker?.cancel()
         ticker = Task { [weak self] in
             while !Task.isCancelled {
@@ -447,7 +474,9 @@ final class AppModel {
 
     /// This phone's position, to the squad.
     private func report() {
-        guard let me, let position = location.latest() else { return }
+        guard let me else { return }
+        location.start()
+        guard let position = location.latest() else { return }
         setMyPosition(position, member: me)
     }
 
@@ -455,11 +484,11 @@ final class AppModel {
     func setMyPosition(_ position: MemberPosition, member me: MemberID) {
         var mine = position
         mine.member = me
-        positions[me] = mine
         switch role {
         case .leader:
-            if let out = core?.setPosition(position, of: me) { sent(out) }
+            updateLeader { $0.setPosition(position, of: me) }
         case .member:
+            positions[me] = mine
             client?.send(.position(position))
         case .none:
             break

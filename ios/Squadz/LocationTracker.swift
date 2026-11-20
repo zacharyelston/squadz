@@ -5,7 +5,18 @@ import SquadKit
 /// Follows this phone's position while the app is open.
 @MainActor
 final class LocationTracker {
-    private let manager = CLLocationManager()
+    typealias Updates = @MainActor (@escaping @MainActor (CLLocation?) -> Void) async throws -> Void
+    private let updates: Updates
+
+    init(updates: Updates? = nil) {
+        let manager = CLLocationManager()
+        self.updates = updates ?? { receive in
+            manager.requestWhenInUseAuthorization()
+            for try await update in CLLocationUpdate.liveUpdates() {
+                receive(update.location)
+            }
+        }
+    }
     private var task: Task<Void, Never>?
     private var fix: CLLocation?
     /// Whether Core Location still stands by `fix`. A phone that isn't moving gets no new fixes,
@@ -22,19 +33,17 @@ final class LocationTracker {
 
     func start() {
         guard task == nil else { return }
-        manager.requestWhenInUseAuthorization()
-        task = Task { [weak self] in
-            do {
-                for try await update in CLLocationUpdate.liveUpdates() {
-                    if let location = update.location {
-                        self?.fix = location
-                        self?.current = true
-                    } else {
-                        self?.current = false
-                    }
-                }
-            } catch {}
+        task = Task { [weak self, updates] in
+            guard !Task.isCancelled else { return }
+            try? await updates { [weak self] location in
+                guard !Task.isCancelled else { return }
+                if let location { self?.fix = location }
+                self?.current = location != nil
+            }
+            // stop() may already have installed a replacement.
+            guard !Task.isCancelled else { return }
             self?.current = false
+            self?.task = nil
         }
     }
 
