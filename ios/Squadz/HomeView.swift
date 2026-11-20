@@ -76,7 +76,7 @@ struct HomeView: View {
                 } header: {
                     Text("Relay (optional)")
                 } footer: {
-                    Text("With a relay, a squad you start can be reached over the internet as well as nearby. The relay passes messages along and can read them. Leave this empty to stay on your own network.")
+                    Text("With a relay, a squad you start can be reached over the internet as well as nearby. The relay passes messages along and can't read them. Leave this empty to stay on your own network.")
                 }
             }
             .overlay {
