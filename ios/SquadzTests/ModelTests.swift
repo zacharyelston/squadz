@@ -48,6 +48,58 @@ final class ModelTests: XCTestCase {
         }
     }
 
+    func testZoneDefinitionsAndAlertsSyncAndSurviveLeaderRestart() async throws {
+        let leader = model("Leader"), member = model("Ben")
+        leader.startSquad(name: "Zones", as: "Leader")
+        XCTAssertEqual(leader.role, .leader, leader.alert ?? "Could not lead")
+        try await wait("leader listening") { leader.hostPort != nil }
+        leader.openJoining()
+        try await wait("listener with invite key") { leader.hostIsListening }
+        point(to: leader, member)
+        member.join(try XCTUnwrap(leader.invite), as: "Ben")
+        try await wait("member joined") { member.role == .member && leader.squad?.members.count == 2 }
+        let ben = try XCTUnwrap(member.me)
+        let center = GeoPoint(latitude: 42.36, longitude: -71.06)
+        let zone = SquadZone(name: "Rally", shape: .circle(center: center, radius: 100), rule: .goal, members: [ben])
+        XCTAssertTrue(leader.saveZone(zone))
+        try await wait("zone received") { member.zones == [zone] }
+        XCTAssertFalse(member.saveZone(zone), "A member cannot edit zones")
+        let base = Date.now
+        for (index, east) in [150.0, 150, 0, 0].enumerated() {
+            let time = base.addingTimeInterval(Double(index))
+            member.setMyPosition(MemberPosition(at: Geo.offset(center, east: east, north: 0), accuracy: 3, time: time), member: ben)
+            try await wait("position received") { leader.positions[ben].map { abs($0.time.timeIntervalSince(time)) < 0.001 } == true }
+        }
+        try await wait("arrival delivered") { leader.zoneEvents.count == 1 && member.zoneEvents.count == 1 }
+        XCTAssertEqual(member.zoneEvents.first?.kind, .arrived)
+        XCTAssertEqual(leader.zoneAlert?.id, member.zoneAlert?.id)
+        XCTAssertTrue(member.orders.isEmpty)
+        let mission = try XCTUnwrap(leader.missionID)
+        XCTAssertEqual(leader.logs.entries(of: mission).filter { $0.kind == .zoneArrival }.count, 1)
+        let corners = [(-100.0, -100.0), (100.0, -100.0), (100.0, 100.0), (-100.0, 100.0)]
+            .map { Geo.offset(center, east: $0.0, north: $0.1) }
+        let allowed = SquadZone(name: "Search area", shape: .polygon(vertices: corners), rule: .allowedArea, members: [ben])
+        XCTAssertTrue(leader.saveZone(allowed))
+        try await wait("polygon received") { member.zones.count == 2 }
+        for (index, east) in [0.0, 0, 150, 150].enumerated() {
+            let time = base.addingTimeInterval(Double(index + 4))
+            member.setMyPosition(MemberPosition(at: Geo.offset(center, east: east, north: 0), accuracy: 3, time: time), member: ben)
+            try await wait("boundary position received") { leader.positions[ben].map { abs($0.time.timeIntervalSince(time)) < 0.001 } == true }
+        }
+        try await wait("departure delivered") { member.zoneEvents.count == 2 }
+        XCTAssertEqual(member.zoneEvents.last?.kind, .left)
+        XCTAssertEqual(leader.logs.entries(of: mission).filter { $0.kind == .zoneDeparture }.count, 1)
+        let restored = again(0)
+        restored.resume()
+        XCTAssertEqual(restored.zones, [zone, allowed])
+        XCTAssertEqual(restored.zoneEvents, leader.zoneEvents)
+        XCTAssertNil(restored.zoneAlert, "Historical events must not announce again on restart")
+        XCTAssertEqual(restored.logs.entries(of: mission).filter { $0.kind == .zoneArrival || $0.kind == .zoneDeparture }.count, 2,
+                       "Restarting must not duplicate historical zone crossings in the mission log")
+        restored.endSquad()
+        leader.endSquad()
+    }
+
     func testFailedEnrollmentSaveKeepsLastRosterAndAllowsRetry() async throws {
         let leader = model("Leader"), member = model("Member")
         leader.startSquad(name: "Red", as: "Leader")

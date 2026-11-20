@@ -168,6 +168,8 @@ struct LogRow: View {
         case .orderAnswer: "checkmark.bubble"
         case .orderCancelled: "flag.slash"
         case .note: "bubble.left"
+        case .zoneArrival: "flag.checkered"
+        case .zoneDeparture: "rectangle.portrait.and.arrow.right"
         case .streamStarted: "video"
         case .streamStopped: "video.slash"
         case .clip: "film"
@@ -187,6 +189,7 @@ struct LogRow: View {
         case .orderAnswer: return "\(who): \(entry.text ?? "answered")"
         case .orderCancelled: return "Order cancelled"
         case .note: return "\(who): \(entry.text ?? "")"
+        case .zoneArrival, .zoneDeparture: return entry.text ?? "Zone crossing by \(who)"
         case .streamStarted: return "\(who) started streaming"
         case .streamStopped: return "\(who) stopped streaming"
         case .clip: return "Clip from \(who)" + (entry.seconds.map { ", \(Int($0.rounded())) s" } ?? "")

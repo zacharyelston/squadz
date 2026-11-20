@@ -18,6 +18,7 @@ Every squad a device leads gets a log. It starts when the squad starts, picks up
 | `orderAnswer` | Someone answers | Who, Seen / Done / Can't, the order's ID |
 | `orderCancelled` | The leader takes an order back | The order's ID |
 | `note` | A field note, from anyone | Who, the words, where they were |
+| `zoneArrival`, `zoneDeparture` | A monitored member crosses a zone boundary | Who, zone label, location, and zone ID |
 | `streamStarted`, `streamStopped` | A phone starts or stops streaming | Who, where they were, the stream's ID |
 | `clip` | A recording of a stream is closed | Who, where, how long, the stream's ID, **the file** |
 | `still` | The leader snaps a picture from a stream | Who, where, the stream's ID, **the file** |

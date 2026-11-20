@@ -260,3 +260,11 @@ An invite's link is sealed with the invite's link key, which comes from `enrol`.
 The typed code is never used on a sealed link.
 
 [`testdata/join/vectors.json`](../testdata/join/vectors.json) has a sealed link's first two frames each way under `sealed`.
+
+### Optional zone status fields
+
+`status` can include `zones` (up to 32 definitions) and `zoneEvents` (latest 50 crossings, oldest first). These are optional additions at the current protocol version: older clients ignore them, newer clients treat absent fields as unsupported/empty. They are leader-authored state; a member sending `status` cannot modify them.
+
+A zone contains `id` (UUID), `name` (1–40 trimmed characters), `rule` (`goal` or `allowedArea`), `shape`, and optional `members` (member IDs; omitted means the whole squad). Shapes use Swift's tagged Codable representation: `{"circle":{"center":{"latitude":42.36,"longitude":-71.06},"radius":100}}` or `{"polygon":{"vertices":[...]}}`. Coordinates and radii are validated before committing a zone.
+
+An event contains `id`, `zone`, `zoneName`, `member`, `memberName`, `kind` (`arrived` or `left`) and `time`. The leader evaluates authenticated member reports; a claimed member in a position payload is overwritten by the link identity. Event UUIDs deduplicate alerts. The first status snapshot is historical and does not trigger member notification banners. Zone state never changes order acknowledgements.

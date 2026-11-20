@@ -17,7 +17,7 @@ The leader opens **Invite** (the QR button) and shows the code. A member taps **
 
 ## A member's phone
 
-Four tabs: **Map**, **Team**, **Orders** and **Notes**.
+Five tabs: **Map**, **Team**, **Orders**, **Zones** and **Notes**.
 
 ### Map
 
@@ -126,3 +126,15 @@ Orders and notes live in the leader's app while it is running. If the leader's a
 - On a real iPhone and iPad on one Wi-Fi network: scanning the code, joining, the map, the compass arrow, leaving, orders and their answers, cancelling, notes, and the update rate.
 - In the simulator and in tests: everything above except the compass and the phone's buzz, which a simulator doesn't have.
 - Not yet: any of it through the relay between real devices, or over cellular.
+
+## Zones
+
+**Zones** is a read-only tab on members' phones and an editable panel on the commander's device. Every saved zone is labeled on the map. Circle zones have a centre and a radius in metres; polygon zones are drawn by tapping corners. Edges close automatically. Undo removes the last corner. Save validates the shape, label and selected members; no selection means the whole squad, including the commander.
+
+Choose **Goal arrival** to report entry, or **Leave allowed area** to report departure. The commander and the member involved see an in-app alert. **Enable notification banners** requests iOS notification permission; alerts also appear as system banners when permitted. All members can read the latest 50 zone events. Arrival is an observation; it does not complete an order.
+
+Zone definitions and event history survive a leader restart and are included in status on join/reconnect. Old apps ignore the optional fields, so they can still report positions but do not draw zones or show their alerts. Only the leader can change zones.
+
+Monitoring needs two fresh, distinct reports wholly across the accuracy margin (`max(3 m, accuracy)`). Initial positions, edits, reconnects and gaps longer than two minutes establish a baseline without claiming a crossing. A member who starts outside an allowed area has not been observed leaving it. GPS uncertainty, link loss and stale positions do not produce departure alerts. There is no background-monitoring guarantee: keep the squad apps open and connected for live alerts.
+
+The reusable geometry and map layers are in this repository's Swift package (`swift/Sources/CoreGeo`, `ZoneKit` and `ZoneMapKit`), so another app can use them by depending on it.

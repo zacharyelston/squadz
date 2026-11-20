@@ -19,11 +19,13 @@ struct SquadView: View {
     /// The next tap on the map says where the order being written is for.
     @State private var placing = false
     @State private var memberTab = MemberTab.map
+    @State private var zoneDraft: ZoneDraft?
+    @State private var drawingZone = false
     /// The team list (on the leader's device, the whole panel) can be put away to give the map
     /// the screen. Kept across launches.
     @AppStorage("showsList") private var showsList = true
 
-    enum MemberTab { case map, team, orders, notes }
+    enum MemberTab { case map, team, orders, zones, notes }
 
     private var leading: Bool { model.role == .leader }
     private var squadName: String { model.squad?.name ?? "this squad" }
@@ -31,10 +33,15 @@ struct SquadView: View {
     /// A tap on the map sets the place only while the leader is writing a move-to order.
     private var picking: Bool { leading && showsList && panel == .orders && draft.needsPlace && placing }
 
+    private var pickingZone: Bool { leading && showsList && panel == .zones && drawingZone && zoneDraft != nil }
+
     var body: some View {
         NavigationStack {
             Group {
                 if leading { leaderScreen } else { memberScreen }
+            }
+            .safeAreaInset(edge: .top, spacing: 0) {
+                VStack(spacing: 0) { banners; zoneBanner }
             }
             .navigationTitle(model.squad?.name ?? "")
             .navigationBarTitleDisplayMode(.inline)
@@ -95,14 +102,13 @@ struct SquadView: View {
 
     private var leaderScreen: some View {
         VStack(spacing: 0) {
-            banners
             TimelineView(.periodic(from: .now, by: 15)) { context in
                 let layout = wide ? AnyLayout(HStackLayout(spacing: 0)) : AnyLayout(VStackLayout(spacing: 0))
                 layout {
                     map(now: context.date)
                     if showsList {
                         if wide { Divider() }
-                        LeaderPanel(tab: $panel, draft: $draft, placing: $placing, now: context.date)
+                        LeaderPanel(tab: $panel, draft: $draft, placing: $placing, zoneDraft: $zoneDraft, drawingZone: $drawingZone, now: context.date)
                             .frame(width: wide ? 400 : nil)
                             .frame(maxHeight: wide ? .infinity : 390)
                     }
@@ -116,7 +122,6 @@ struct SquadView: View {
     private var memberScreen: some View {
         TabView(selection: $memberTab) {
             VStack(spacing: 0) {
-                banners
                 // A new order comes to the front here; once it's seen, the next one to do shows.
                 if let shown = model.newOrder ?? model.queue.first {
                     NextOrderLine(order: shown, isNew: model.newOrder != nil, waiting: model.queue.count) { memberTab = .orders }
@@ -143,6 +148,10 @@ struct SquadView: View {
                 .tag(MemberTab.orders)
                 .badge(model.queue.count)
 
+            VStack(spacing: 0) { ZonesPanel(draft: .constant(nil), drawing: .constant(false)) }
+                .tabItem { Label("Zones", systemImage: "circle.dashed") }
+                .tag(MemberTab.zones)
+
             NotesView()
                 .tabItem { Label("Notes", systemImage: "bubble.left.and.bubble.right") }
                 .tag(MemberTab.notes)
@@ -151,6 +160,16 @@ struct SquadView: View {
     }
 
     // MARK: Shared
+
+    @ViewBuilder private var zoneBanner: some View {
+        if let event = model.zoneAlert {
+            Label(event.text, systemImage: event.kind == .arrived ? "flag.checkered" : "bell.badge")
+                .font(.subheadline.weight(.semibold))
+                .frame(maxWidth: .infinity).padding(10)
+                .background(event.kind == .arrived ? Color.green.opacity(0.2) : Color.orange.opacity(0.2))
+                .accessibilityAddTraits(.updatesFrequently)
+        }
+    }
 
     @ViewBuilder private var banners: some View {
         if model.isStreaming {
@@ -200,13 +219,16 @@ struct SquadView: View {
 
     private func map(now: Date) -> some View {
         SquadMap(located: model.located, now: now, recenter: recenter, heading: model.heading, places: places,
-                 onPick: picking ? { place in
+                 zones: model.zones,
+                 draftZone: leading && panel == .zones ? zoneDraft?.zone : nil,
+                 draftPoints: leading && panel == .zones && zoneDraft?.shape == .polygon ? zoneDraft?.points ?? [] : [],
+                 onPick: pickingZone ? { point in zoneDraft?.pick(point) } : picking ? { place in
                      draft.place = place
                      placing = false
                  } : nil)
             .overlay(alignment: .top) {
-                if picking {
-                    Label("Tap the map where you want them", systemImage: "hand.tap.fill")
+                if picking || pickingZone {
+                    Label(pickingZone ? (zoneDraft?.shape == .circle ? "Tap the circle centre" : "Tap polygon corners · \(zoneDraft?.points.count ?? 0) points") : "Tap the map where you want them", systemImage: "hand.tap.fill")
                         .font(.subheadline.weight(.semibold))
                         .padding(.horizontal, 14)
                         .padding(.vertical, 8)
@@ -336,12 +358,14 @@ struct VideoLayerView: UIViewRepresentable {
 
 /// Beside the leader's map: the team, or orders.
 struct LeaderPanel: View {
-    enum Tab: Hashable { case team, orders, notes, video }
+    enum Tab: Hashable { case team, orders, zones, notes, video }
 
     @Environment(AppModel.self) private var model
     @Binding var tab: Tab
     @Binding var draft: OrderDraft
     @Binding var placing: Bool
+    @Binding var zoneDraft: ZoneDraft?
+    @Binding var drawingZone: Bool
     let now: Date
 
     var body: some View {
@@ -349,6 +373,7 @@ struct LeaderPanel: View {
             Picker("Panel", selection: $tab) {
                 Text("Team").tag(Tab.team)
                 Text(model.openOrders.isEmpty ? "Orders" : "Orders (\(model.openOrders.count))").tag(Tab.orders)
+                Text("Zones").tag(Tab.zones)
                 Text(model.unreadNotes == 0 || tab == .notes ? "Notes" : "Notes (\(model.unreadNotes))").tag(Tab.notes)
                 Text(model.streams.isEmpty ? "Video" : "Video ●").tag(Tab.video)
             }
@@ -358,6 +383,7 @@ struct LeaderPanel: View {
             switch tab {
             case .team: MemberList(now: now)
             case .orders: OrdersPanel(draft: $draft, placing: $placing)
+            case .zones: ZonesPanel(draft: $zoneDraft, drawing: $drawingZone)
             case .notes: NotesView()
             case .video: VideoPanel()
             }

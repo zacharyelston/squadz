@@ -28,6 +28,7 @@ struct LogEntry: Codable, Identifiable, Equatable {
         case position
         case order, orderAnswer, orderCancelled
         case note
+        case zoneArrival, zoneDeparture
         case streamStarted, streamStopped
         /// A recording of a stream, in `file`.
         case clip
@@ -184,11 +185,15 @@ struct MissionLogger {
     private var notes: Set<UUID> = []
     private var notices: Set<UUID> = []
     private var streams: [UUID: MemberID] = [:]
+    private var zoneEvents: Set<UUID> = []
 
     /// - Parameter resuming: the leader's app came back to a squad it was already leading, so the
     ///   people already in it are not joining now.
     init<M: Mission>(resuming core: SquadCore<M>?) {
-        if let core { members = Dictionary(core.squad.members.map { ($0.id, $0.name) }, uniquingKeysWith: { a, _ in a }) }
+        if let core {
+            members = Dictionary(core.squad.members.map { ($0.id, $0.name) }, uniquingKeysWith: { a, _ in a })
+            zoneEvents = Set(core.zoneEvents.map(\.id))
+        }
     }
 
     mutating func changes<M: Mission>(in core: SquadCore<M>, streams live: [VideoMission.Stream], now: Date) -> [LogEntry] {
@@ -230,6 +235,14 @@ struct MissionLogger {
             notes.insert(n.id)
             out.append(LogEntry(time: n.time, kind: .note, name: n.author, at: n.at, accuracy: n.accuracy, text: n.text))
         }
+
+        for event in core.zoneEvents where !zoneEvents.contains(event.id) {
+            zoneEvents.insert(event.id)
+            out.append(LogEntry(id: event.id, time: event.time, kind: event.kind == .arrived ? .zoneArrival : .zoneDeparture,
+                                member: event.member, name: event.memberName, at: core.positions[event.member]?.at,
+                                text: event.text, ref: event.zone))
+        }
+        zoneEvents.formIntersection(Set(core.zoneEvents.map(\.id)))
 
         let now_ = Dictionary(live.map { ($0.id, $0.member) }, uniquingKeysWith: { a, _ in a })
         for s in live where streams[s.id] == nil {
