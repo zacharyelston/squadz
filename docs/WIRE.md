@@ -74,7 +74,7 @@ SquadKit writes keys in sorted order so the same message is always the same byte
 | `welcome` | `member`, `squad` | The answer to `hello` on a member's credential link. The same credential is always the same `member` |
 | `observing` | a squad | The answer to `hello` on an observer's credential link |
 | `refused` | `reason` | Wrong version, an invite that is closed, a credential that was revoked, or not a role this host takes. The leader closes the link and the client stops trying |
-| `status` | `revision`, `squad`, `holds`, `missions` | Sent to everyone whenever the squad changes |
+| `status` | `revision`, `squad`, `holds`, `missions`, `reportEvery`? | Sent to everyone whenever the squad changes. `reportEvery` is how often the leader wants each device's `position`, in seconds, from 1 to 600; a device follows it from the next report on. Absent, the device uses its own default (10 in Squadz) |
 | `order` | `id`, `kind`, `text`, `time`, `at`?, `to`? | No `to` means the whole squad. Text up to 140 characters |
 | `orderCancel` | `order` | The leader took that order back: it no longer needs doing or answering. Sent to everyone the order was for and to observers, and again to a member who was away, when it reconnects |
 | `receipt` | `id`, `status`, `detail` | What happened to a note or file: `received`, `stored` or `refused` |

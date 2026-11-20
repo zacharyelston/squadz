@@ -111,8 +111,13 @@ final class AppModel {
     /// Seconds a member looks for the squad on this network before going through its relay.
     var relayAfter: TimeInterval = 3
 
-    /// Seconds between position reports.
-    static let reportEvery: TimeInterval = 10
+    /// Seconds between position reports, until the squad's leader says otherwise.
+    static let defaultReportEvery = 10
+    /// The rates a leader can pick, in seconds.
+    static let reportRates = [2, 5, 10, 30, 60]
+    /// Seconds between this device's position reports: the leader's choice, which every device
+    /// in the squad follows.
+    private(set) var reportEvery = AppModel.defaultReportEvery
 
     init(defaults: UserDefaults = .standard, keychainService: String = "com.zacelston.squadz.squads",
          folder: URL = URL.applicationSupportDirectory, service: SquadService = .squadz, advertise: Bool = true) {
@@ -232,6 +237,11 @@ final class AppModel {
             leaderID = me
             role = .leader
             leadingRelay = relay
+            // The leader's rate from last time carries to this squad; everyone hears it as they join.
+            if let chosen = defaults.object(forKey: "reportEvery") as? Int {
+                _ = self.core?.setReportEvery(chosen, now: .now)
+            }
+            reportEvery = self.core?.reportEvery ?? Self.defaultReportEvery
             host.start()
             if let relay { openRoom(on: relay, for: core) }
             sent([])
@@ -337,6 +347,22 @@ final class AppModel {
     func remove(_ member: MemberID) {
         guard member != me else { return }
         updateLeader { $0.removeMember(member, now: .now) }
+    }
+
+    /// The leader sets how often every device in the squad sends its position.
+    func setReportEvery(_ seconds: Int) {
+        guard role == .leader else { return }
+        defaults.set(seconds, forKey: "reportEvery")
+        updateLeader { $0.setReportEvery(seconds, now: .now) }
+        follow(core?.reportEvery)
+    }
+
+    /// Takes up a new rate, from the next report on.
+    private func follow(_ seconds: Int?) {
+        let rate = seconds ?? Self.defaultReportEvery
+        guard rate != reportEvery else { return }
+        reportEvery = rate
+        if ticker != nil { startReporting() }
     }
 
     // MARK: Field notes
@@ -581,6 +607,7 @@ final class AppModel {
             show(w.squad)
         case let .status(s):
             show(s.squad)
+            follow(s.reportEvery)
         case let .positions(report):
             for p in report.positions { if let m = p.member { positions[m] = p } }
         case let .notice(n):
@@ -664,6 +691,7 @@ final class AppModel {
         answers = [:]
         myAnswers = [:]
         cancelledOrders = []
+        reportEvery = Self.defaultReportEvery
         notes = []
         notesRead = 0
         myNotes = []
@@ -696,7 +724,7 @@ final class AppModel {
         ticker = Task { [weak self] in
             while !Task.isCancelled {
                 self?.report()
-                try? await Task.sleep(for: .seconds(Self.reportEvery))
+                try? await Task.sleep(for: .seconds(self?.reportEvery ?? Self.defaultReportEvery))
             }
         }
     }

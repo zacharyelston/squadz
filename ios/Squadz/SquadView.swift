@@ -271,6 +271,7 @@ enum MemberDetail: String, CaseIterable, Identifiable {
 /// member's phone offers the ones it has.
 struct SquadSettingsView: View {
     let leading: Bool
+    @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @AppStorage(MemberDetail.storageKey) private var stored = MemberDetail.everything
 
@@ -299,6 +300,19 @@ struct SquadSettingsView: View {
                     Text(leading
                          ? "This changes the list on this device only. Everyone in the squad chooses for their own."
                          : "This changes the list on this phone only. The squad's leader also sees who is connected and when each person joined.")
+                }
+                if leading {
+                    Section {
+                        Picker("Position updates", selection: Binding(get: { model.reportEvery }, set: { model.setReportEvery($0) })) {
+                            ForEach(Set(AppModel.reportRates + [model.reportEvery]).sorted(), id: \.self) { seconds in
+                                Text(seconds < 60 ? "Every \(seconds) s" : "Every \(seconds / 60) min").tag(seconds)
+                            }
+                        }
+                    } header: {
+                        Text("For the whole squad")
+                    } footer: {
+                        Text("How often every device in the squad sends where it is and which way it points. Each device takes this up as it joins, and again if you change it. Faster uses more battery.")
+                    }
                 }
             }
             .navigationTitle("Squad settings")

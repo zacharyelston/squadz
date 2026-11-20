@@ -328,12 +328,19 @@ public struct SquadStatus: Codable, Equatable, Sendable {
     public var squad: Squad
     public var holds: [Hold]
     public var missions: [MissionStatus]
-    public init(revision: Int, squad: Squad, holds: [Hold], missions: [MissionStatus] = []) {
+    /// How often the leader wants each device to send its position, in seconds. Absent means
+    /// the device's own default.
+    public var reportEvery: Int?
+    public init(revision: Int, squad: Squad, holds: [Hold], missions: [MissionStatus] = [], reportEvery: Int? = nil) {
         self.revision = revision
         self.squad = squad
         self.holds = holds
         self.missions = missions
+        self.reportEvery = reportEvery
     }
+
+    /// The fastest and slowest a leader may ask for, in seconds.
+    public static let reportEveryRange = 1...600
 
     /// A mission's section, if this squad runs that mission at that version.
     public func mission(_ id: String, version: Int) -> Data? {

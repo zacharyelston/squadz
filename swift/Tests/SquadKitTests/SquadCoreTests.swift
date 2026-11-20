@@ -106,6 +106,27 @@ final class SquadCoreTests: XCTestCase {
         XCTAssertFalse(quiet.has("Ben") { if case .note = $0 { return true }; return false })
     }
 
+    func testTheLeaderSetsHowOftenPositionsCome() throws {
+        let y = Yard(mission: NoMission())
+        y.join("Ana")
+        XCTAssertNil(y.lastStatus("Ana")?.reportEvery, "left to each device until the leader says")
+
+        y.command { $0.setReportEvery(3, now: $1) }
+        XCTAssertEqual(y.lastStatus("Ana")?.reportEvery, 3)
+        // Someone who joins afterwards is told as they join.
+        y.join("Ben")
+        XCTAssertEqual(y.lastStatus("Ben")?.reportEvery, 3)
+
+        // Kept within reason, and saying the same thing again sends nothing.
+        y.command { $0.setReportEvery(0, now: $1) }
+        XCTAssertEqual(y.host.reportEvery, 1)
+        y.command { $0.setReportEvery(100_000, now: $1) }
+        XCTAssertEqual(y.host.reportEvery, 600)
+        XCTAssertTrue(y.host.setReportEvery(600, now: y.now).isEmpty)
+        y.command { $0.setReportEvery(nil, now: $1) }
+        XCTAssertNil(y.lastStatus("Ana")?.reportEvery)
+    }
+
     func testTheLeaderTakesAnOrderBack() throws {
         let y = Yard(mission: NoMission())
         let ana = try XCTUnwrap(y.join("Ana"))

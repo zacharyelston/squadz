@@ -52,6 +52,9 @@ public struct SquadCore<M: Mission> {
     /// Whether members see each other's positions, as observers always do. The leader's choice:
     /// on for a squad that is out together, off where only the leader should know where people are.
     public var sharesPositions: Bool
+    /// How often the leader wants positions, in seconds; nil leaves it to each device. Sent to
+    /// everyone in `status`, so a device learns it as it joins and again if it changes.
+    public private(set) var reportEvery: Int?
     /// Whether members see each other's notes, like a chat room, as observers always do. Off,
     /// notes go to the leader only.
     public var sharesNotes: Bool
@@ -409,6 +412,15 @@ public struct SquadCore<M: Mission> {
         return (members + Array(observers)).sorted { $0.raw < $1.raw }.map { Outgoing(to: $0, .order(order)) }
     }
 
+    /// Sets how often every device should send its position, kept within
+    /// `SquadStatus.reportEveryRange`, and tells everyone. Nil leaves it to each device.
+    public mutating func setReportEvery(_ seconds: Int?, now: Date) -> [Outgoing] {
+        let wanted = seconds.map { min(max($0, SquadStatus.reportEveryRange.lowerBound), SquadStatus.reportEveryRange.upperBound) }
+        guard wanted != reportEvery else { return [] }
+        reportEvery = wanted
+        return changed(now: now)
+    }
+
     /// A note from the leader's own device, to everyone who gets notes.
     public mutating func postNote(_ note: FieldNote) -> [Outgoing] {
         notes.append(note)
@@ -499,6 +511,6 @@ public struct SquadCore<M: Mission> {
         let section = mission.status(core: core, now: now).map { MissionStatus(id: M.id, version: M.version, payload: $0) }
         return SquadStatus(revision: revision, squad: squad,
                            holds: holds(now: now).sorted { ($0.source, $0.kind, $0.text) < ($1.source, $1.kind, $1.text) },
-                           missions: section.map { [$0] } ?? [])
+                           missions: section.map { [$0] } ?? [], reportEvery: reportEvery)
     }
 }

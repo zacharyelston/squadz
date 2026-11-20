@@ -83,6 +83,7 @@ struct SquadMap: UIViewRepresentable {
             pin.coordinate = CLLocationCoordinate2D(latitude: position.at.latitude, longitude: position.at.longitude)
             pin.title = l.member.name
             pin.isMe = l.isMe
+            pin.heading = position.heading
             pin.isStale = l.isStale(now: now)
             if let view = map.view(for: pin) as? MKMarkerAnnotationView { c.style(view, pin, on: map) }
         }
@@ -113,6 +114,8 @@ struct SquadMap: UIViewRepresentable {
         let id: MemberID
         var isMe = false
         var isStale = false
+        /// Which way they said they were pointing, with their position.
+        var heading: Double?
         init(id: MemberID) { self.id = id }
     }
 
@@ -148,19 +151,19 @@ struct SquadMap: UIViewRepresentable {
         var recenter = 0
 
         var heading: Double?
-        /// The arrow as last drawn, so it is drawn again only when it has turned.
-        private var arrowDrawn: (degrees: Int, image: UIImage)?
+        /// Arrows already drawn, by how far they are turned, to the nearest four degrees.
+        private var arrows: [Int: UIImage] = [:]
 
-        /// This device's pin is an arrow that points the way the device does, whichever way up
-        /// the map is. Without a compass it is the plain location mark.
+        /// A pin is an arrow that points the way its device does, whichever way up the map is:
+        /// this device's from its compass as it turns, another's from the heading that came
+        /// with its position. Without a heading it is the plain mark.
         func style(_ view: MKMarkerAnnotationView, _ pin: MemberPin, on map: MKMapView) {
             view.markerTintColor = pin.isMe ? .systemBlue : .systemGreen
-            if pin.isMe, let heading {
-                let degrees = Int((heading - map.camera.heading).rounded())
-                if arrowDrawn?.degrees != degrees, let arrow = Self.arrow(turned: Double(degrees)) {
-                    arrowDrawn = (degrees, arrow)
-                }
-                if view.glyphImage !== arrowDrawn?.image { view.glyphImage = arrowDrawn?.image }
+            if let pointing = pin.isMe ? (heading ?? pin.heading) : pin.heading {
+                var turned = Int(((pointing - map.camera.heading) / 4).rounded()) * 4 % 360
+                if turned < 0 { turned += 360 }
+                if arrows[turned] == nil { arrows[turned] = Self.arrow(turned: Double(turned)) }
+                if view.glyphImage !== arrows[turned] { view.glyphImage = arrows[turned] }
             } else {
                 view.glyphImage = UIImage(systemName: pin.isMe ? "location.fill" : "person.fill")
             }
@@ -183,9 +186,9 @@ struct SquadMap: UIViewRepresentable {
 
         /// The map was turned: the arrow has to turn against it.
         func mapViewDidChangeVisibleRegion(_ mapView: MKMapView) {
-            guard heading != nil, let mine = pins.values.first(where: \.isMe),
-                  let view = mapView.view(for: mine) as? MKMarkerAnnotationView else { return }
-            style(view, mine, on: mapView)
+            for pin in pins.values where pin.heading != nil || (pin.isMe && heading != nil) {
+                if let view = mapView.view(for: pin) as? MKMarkerAnnotationView { style(view, pin, on: mapView) }
+            }
         }
 
         func mapView(_ mapView: MKMapView, viewFor annotation: any MKAnnotation) -> MKAnnotationView? {

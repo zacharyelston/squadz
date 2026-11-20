@@ -180,6 +180,14 @@ final class ModelTests: XCTestCase {
         try await wait("Ben in") { ben.role == .member && ben.linkProblem == nil && ana.squad?.members.count == 2 }
         let benID = try XCTUnwrap(ben.me)
 
+        // The leader's update rate reaches a member who is already in, and one who joins later gets it too.
+        XCTAssertEqual(ben.reportEvery, 10)
+        ana.setReportEvery(2)
+        try await wait("Ben follows the leader's rate") { ben.reportEvery == 2 }
+        XCTAssertEqual(ana.reportEvery, 2)
+        ben.setReportEvery(60)
+        XCTAssertEqual(ben.reportEvery, 2, "only the leader sets it")
+
         // Field notes are a chat: each sees the other's, under the name the leader knows them by.
         XCTAssertFalse(ben.sendNote("   "))
         XCTAssertTrue(ben.sendNote("At the gate"))

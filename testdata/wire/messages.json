@@ -80,7 +80,7 @@
     "type" : "refused"
   },
   {
-    "json" : "{\"body\":{\"holds\":[{\"kind\":\"checkFire\",\"source\":\"core\",\"text\":\"Check fire, called by Ana.\"},{\"kind\":\"notAtRally\",\"member\":\"00000000-0000-4000-8000-000000000002\",\"source\":\"test.rally\",\"text\":\"Ana isn't at the rally point.\"}],\"missions\":[{\"id\":\"test.rally\",\"payload\":\"eyJyYWxseSI6bnVsbH0=\",\"version\":1}],\"revision\":4,\"squad\":{\"id\":\"00000000-0000-4000-8000-000000000001\",\"members\":[{\"device\":\"00000000-0000-4000-8000-000000000003\",\"id\":\"00000000-0000-4000-8000-000000000002\",\"name\":\"Ana\",\"role\":\"member\"}],\"name\":\"Red\"}},\"seq\":21,\"type\":\"status\",\"v\":7}",
+    "json" : "{\"body\":{\"holds\":[{\"kind\":\"checkFire\",\"source\":\"core\",\"text\":\"Check fire, called by Ana.\"},{\"kind\":\"notAtRally\",\"member\":\"00000000-0000-4000-8000-000000000002\",\"source\":\"test.rally\",\"text\":\"Ana isn't at the rally point.\"}],\"missions\":[{\"id\":\"test.rally\",\"payload\":\"eyJyYWxseSI6bnVsbH0=\",\"version\":1}],\"reportEvery\":5,\"revision\":4,\"squad\":{\"id\":\"00000000-0000-4000-8000-000000000001\",\"members\":[{\"device\":\"00000000-0000-4000-8000-000000000003\",\"id\":\"00000000-0000-4000-8000-000000000002\",\"name\":\"Ana\",\"role\":\"member\"}],\"name\":\"Red\"}},\"seq\":21,\"type\":\"status\",\"v\":7}",
     "type" : "status"
   },
   {
