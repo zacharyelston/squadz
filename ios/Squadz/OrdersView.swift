@@ -160,9 +160,16 @@ struct OrdersPanel: View {
                 Text(order.title).fontWeight(.semibold)
                 Spacer()
                 Text(order.time.formatted(date: .omitted, time: .shortened)).font(.footnote).foregroundStyle(.secondary)
+                if !model.isSettled(order) {
+                    Button("Cancel", role: .destructive) { model.cancelOrder(order) }
+                        .font(.footnote)
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                }
             }
             if !order.text.isEmpty, order.kind.coreTitle != nil { Text(order.text).font(.subheadline) }
-            Text(Self.answers(to: order, from: model.recipients(of: order), given: model.answers[order.id] ?? [:]))
+            Text(model.cancelledOrders.contains(order.id) ? "Cancelled"
+                 : Self.answers(to: order, from: model.recipients(of: order), given: model.answers[order.id] ?? [:]))
                 .font(.footnote)
                 .foregroundStyle(.secondary)
         }
@@ -225,13 +232,14 @@ struct MemberOrdersView: View {
                 }
             }
             if !settled.isEmpty {
-                Section("Answered") {
+                Section("Answered or cancelled") {
                     ForEach(settled) { order in
                         VStack(alignment: .leading, spacing: 3) {
                             HStack {
                                 Text(order.title).fontWeight(.semibold)
                                 Spacer()
-                                Text(model.myAnswers[order.id]?.title ?? "").foregroundStyle(.secondary)
+                                Text(model.cancelledOrders.contains(order.id) ? "Cancelled" : model.myAnswers[order.id]?.title ?? "")
+                                    .foregroundStyle(.secondary)
                             }
                             if !order.text.isEmpty, order.kind.coreTitle != nil { Text(order.text).font(.subheadline) }
                             Text(order.time.formatted(date: .omitted, time: .shortened)).font(.footnote).foregroundStyle(.secondary)

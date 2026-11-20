@@ -34,7 +34,7 @@ final class WireTests: XCTestCase {
             let decoded = try SquadWire.decoder.decode(SquadMessage.self, from: Data(v.json.utf8))
             XCTAssertEqual(decoded, SquadMessage(seq: i + 1, body: Samples.all()[i]), v.type)
         }
-        XCTAssertEqual(Set(saved.map(\.type)).count, 23, "every message type has a vector")
+        XCTAssertEqual(Set(saved.map(\.type)).count, 24, "every message type has a vector")
     }
 
     func testFramesSplitAndJoinedAcrossReads() throws {

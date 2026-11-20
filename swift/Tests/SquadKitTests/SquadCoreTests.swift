@@ -68,6 +68,45 @@ final class SquadCoreTests: XCTestCase {
         XCTAssertTrue(y.host.squad.members.isEmpty)
     }
 
+    func testTheLeaderTakesAnOrderBack() throws {
+        let y = Yard(mission: NoMission())
+        let ana = try XCTUnwrap(y.join("Ana"))
+        y.join("Ben")
+        y.join("Watcher", role: .observer)
+        func cancelled(_ who: String, _ id: UUID) -> Bool { y.has(who) { $0 == .orderCancel(id) } }
+
+        y.command { $0.sendOrder(.moveTo, text: "To the oak", at: origin, to: [ana], now: $1) }
+        let order = try XCTUnwrap(y.host.orders.last)
+        y.command { $0.cancelOrder(order.id, now: $1) }
+        XCTAssertTrue(cancelled("Ana", order.id))
+        XCTAssertTrue(cancelled("Watcher", order.id))
+        XCTAssertFalse(cancelled("Ben", order.id), "it wasn't for him")
+        XCTAssertEqual(y.host.cancelled, [order.id])
+        XCTAssertEqual(y.host.orders.map(\.id), [order.id], "kept, for the record")
+
+        // An answer that was already on its way counts for nothing, and cancelling twice says nothing more.
+        y.send("Ana", .orderAck(OrderAck(order: order.id, response: .done)))
+        XCTAssertNil(y.host.acks[order.id]?[ana])
+        XCTAssertTrue(y.host.cancelOrder(order.id, now: y.now).isEmpty)
+        XCTAssertTrue(y.host.cancelOrder(UUID(), now: y.now).isEmpty)
+
+        // Ana was away for the next one being taken back: she hears when she is back, and isn't sent the order again.
+        y.command { $0.sendOrder(.holdPosition, text: "By the gate", to: [ana], now: $1) }
+        let second = try XCTUnwrap(y.host.orders.last)
+        y.host.peerClosed(y.peer("Ana"))
+        y.command { $0.cancelOrder(second.id, now: $1) }
+        y.got["Ana"] = []
+        XCTAssertEqual(y.join("Ana"), ana)
+        XCTAssertTrue(cancelled("Ana", second.id))
+        XCTAssertFalse(y.has("Ana") { if case .order = $0 { return true }; return false })
+
+        // A phone can't take an order back.
+        y.command { $0.sendOrder(.note, text: "Back by five", now: $1) }
+        let third = try XCTUnwrap(y.host.orders.last)
+        y.send("Ana", .orderCancel(third.id))
+        XCTAssertFalse(y.host.cancelled.contains(third.id))
+    }
+
     func testJoinCodesRejoinAndRemoval() throws {
         let y = Yard(mission: NoMission())
         // A link the transport hasn't vouched for can't join.

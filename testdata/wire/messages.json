@@ -92,15 +92,19 @@
     "type" : "order"
   },
   {
-    "json" : "{\"body\":{\"detail\":\"ok\",\"id\":\"00000000-0000-4000-8000-000000000007\",\"status\":\"stored\"},\"seq\":24,\"type\":\"receipt\",\"v\":7}",
+    "json" : "{\"body\":{\"order\":\"00000000-0000-4000-8000-000000000010\"},\"seq\":24,\"type\":\"orderCancel\",\"v\":7}",
+    "type" : "orderCancel"
+  },
+  {
+    "json" : "{\"body\":{\"detail\":\"ok\",\"id\":\"00000000-0000-4000-8000-000000000007\",\"status\":\"stored\"},\"seq\":25,\"type\":\"receipt\",\"v\":7}",
     "type" : "receipt"
   },
   {
-    "json" : "{\"body\":{\"positions\":[{\"accuracy\":2,\"at\":{\"latitude\":42.36,\"longitude\":-71.06},\"member\":\"00000000-0000-4000-8000-000000000002\",\"time\":1800000000250}],\"squad\":\"00000000-0000-4000-8000-000000000001\"},\"seq\":25,\"type\":\"positions\",\"v\":7}",
+    "json" : "{\"body\":{\"positions\":[{\"accuracy\":2,\"at\":{\"latitude\":42.36,\"longitude\":-71.06},\"member\":\"00000000-0000-4000-8000-000000000002\",\"time\":1800000000250}],\"squad\":\"00000000-0000-4000-8000-000000000001\"},\"seq\":26,\"type\":\"positions\",\"v\":7}",
     "type" : "positions"
   },
   {
-    "json" : "{\"body\":{\"id\":\"test.rally\",\"payload\":\"eyJhcnJpdmVkIjp0cnVlfQ==\",\"version\":1},\"seq\":26,\"type\":\"mission\",\"v\":7}",
+    "json" : "{\"body\":{\"id\":\"test.rally\",\"payload\":\"eyJhcnJpdmVkIjp0cnVlfQ==\",\"version\":1},\"seq\":27,\"type\":\"mission\",\"v\":7}",
     "type" : "mission"
   }
 ]

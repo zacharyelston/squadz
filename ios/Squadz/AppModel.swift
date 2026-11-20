@@ -78,6 +78,8 @@ final class AppModel {
     private(set) var answers: [UUID: [MemberID: OrderAck.Response]] = [:]
     /// On a member's phone: what it answered.
     private(set) var myAnswers: [UUID: OrderAck.Response] = [:]
+    /// Orders the leader took back.
+    private(set) var cancelledOrders: Set<UUID> = []
 
     let device: UUID
     private let defaults: UserDefaults
@@ -293,6 +295,7 @@ final class AppModel {
         positions = core.positions
         orders = core.orders.reversed()
         answers = core.acks
+        cancelledOrders = core.cancelled
         refreshLinks()
         if let latest = core.notices.last {
             tell(latest)
@@ -334,8 +337,18 @@ final class AppModel {
         let words = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard kind != .note || !words.isEmpty else { return false }
         let before = core?.orders.count ?? 0
+        // Sending the same people somewhere new replaces where they were sent before.
+        let replaced = kind == .moveTo ? openOrders.filter { $0.kind == .moveTo && Set($0.to ?? []) == to } : []
         updateLeader { $0.sendOrder(kind, text: words, at: place, to: to.isEmpty ? nil : Array(to), now: .now) }
-        return (core?.orders.count ?? 0) > before
+        guard (core?.orders.count ?? 0) > before else { return false }
+        for old in replaced { cancelOrder(old) }
+        return true
+    }
+
+    /// Takes an order back: the phones it was for drop it.
+    func cancelOrder(_ order: Order) {
+        guard role == .leader else { return }
+        updateLeader { $0.cancelOrder(order.id, now: .now) }
     }
 
     /// Who an order is for, without the leader, who gave it.
@@ -345,6 +358,7 @@ final class AppModel {
 
     /// True once everyone an order is for has answered done or can't, or has left.
     func isSettled(_ order: Order) -> Bool {
+        if cancelledOrders.contains(order.id) { return true }
         switch role {
         case .leader:
             return recipients(of: order).allSatisfy { m in
@@ -367,7 +381,7 @@ final class AppModel {
 
     /// A member's answer to an order.
     func answer(_ order: Order, _ response: OrderAck.Response) {
-        guard role == .member, orders.contains(where: { $0.id == order.id }) else { return }
+        guard role == .member, orders.contains(where: { $0.id == order.id }), !cancelledOrders.contains(order.id) else { return }
         myAnswers[order.id] = response
         client?.send(.orderAck(OrderAck(order: order.id, response: response)))
     }
@@ -494,6 +508,8 @@ final class AppModel {
             guard let me, o.isFor(me), !orders.contains(where: { $0.id == o.id }) else { break }
             orders.insert(o, at: 0)
             orders.sort { $0.time > $1.time }
+        case let .orderCancel(id):
+            cancelledOrders.insert(id)
         default:
             break
         }
@@ -558,6 +574,7 @@ final class AppModel {
         orders = []
         answers = [:]
         myAnswers = [:]
+        cancelledOrders = []
         links = [:]
         ticker?.cancel()
         ticker = nil

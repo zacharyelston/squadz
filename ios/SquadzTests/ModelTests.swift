@@ -213,15 +213,28 @@ final class ModelTests: XCTestCase {
         try await wait("Ben has the note") { ben.orders.count == 2 }
         XCTAssertEqual(ben.orders.first?.text, "Back by five")
         XCTAssertEqual(ana.orders.first?.text, "Back by five")
+        // A new move for the same people replaces the old one; an order can also be taken back.
+        let elm = GeoPoint(latitude: 42.362, longitude: -71.062)
+        XCTAssertTrue(ana.sendOrder(.moveTo, text: "The pond", at: oak, to: [benID]))
+        try await wait("Ben has the pond") { ben.queue.contains { $0.text == "The pond" } }
+        XCTAssertTrue(ana.sendOrder(.moveTo, text: "The elm", at: elm, to: [benID]))
+        try await wait("the pond is replaced") { ben.queue.map(\.text) == ["Back by five", "The elm"] }
+        XCTAssertEqual(ana.openOrders.compactMap(\.at), [elm], "one flag, at the new place")
+        ana.cancelOrder(try XCTUnwrap(ana.orders.first { $0.text == "The elm" }))
+        try await wait("the elm is taken back") { ben.queue.map(\.text) == ["Back by five"] }
+        XCTAssertEqual(ben.cancelledOrders.count, 2)
+        ben.answer(try XCTUnwrap(ben.orders.first { $0.text == "The elm" }), .done)
+        XCTAssertNil(ben.myAnswers.first { $0.value == .done && $0.key != order.id })
+
         // Two more wait in the order they came: the oldest is the one to do next.
         XCTAssertTrue(ana.sendOrder(.holdPosition, text: "By the gate"))
-        try await wait("Ben has three") { ben.orders.count == 3 }
+        try await wait("Ben has the gate") { ben.queue.count == 2 }
         XCTAssertEqual(ben.queue.map(\.text), ["Back by five", "By the gate"])
         ben.answer(try XCTUnwrap(ben.queue.first), .done)
         XCTAssertEqual(ben.queue.map(\.text), ["By the gate"])
         ben.answer(try XCTUnwrap(ben.queue.first), .cannot)
         XCTAssertTrue(ben.queue.isEmpty)
-        XCTAssertEqual(ben.orders.count, 3, "answered orders stay in the list")
+        XCTAssertEqual(ben.orders.count, 5, "answered and cancelled orders stay in the list")
         try await wait("the leader sees Can't") { ana.openOrders.isEmpty }
         ana.endSquad()
     }

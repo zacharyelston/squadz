@@ -59,6 +59,8 @@ public struct SquadCore<M: Mission> {
     /// Orders sent this session, oldest first, and each recipient's latest answer.
     public private(set) var orders: [Order] = []
     public private(set) var acks: [UUID: [MemberID: OrderAck.Response]] = [:]
+    /// Orders the leader took back. They stay in `orders`, for the record.
+    public private(set) var cancelled: Set<UUID> = []
     /// What the squad was told, oldest first: members leaving or being removed.
     public private(set) var notices: [Notice] = []
     static var maxNoticesKept: Int { 50 }
@@ -192,7 +194,7 @@ public struct SquadCore<M: Mission> {
             return [Outgoing(to: peer, .receipt(Receipt(id: n.id, status: .stored, detail: "Sent to \(squad.name)'s leader.")))] + toObservers
         case let .orderAck(a):
             // Only from someone the order was for.
-            guard let o = orders.first(where: { $0.id == a.order }), o.isFor(member) else { return [] }
+            guard let o = orders.first(where: { $0.id == a.order }), o.isFor(member), !cancelled.contains(o.id) else { return [] }
             acks[a.order, default: [:]][member] = a.response
             return []
         case let .checkFire(cf):
@@ -203,7 +205,7 @@ public struct SquadCore<M: Mission> {
             let core = view
             return finish(mission.handle(m.payload, from: member, peer: peer, core: core, now: now), now: now)
         case .hello, .link, .seal, .fileOffer, .fileChunk, .fileDone, .enrolled, .leaderKey, .welcome, .observing, .refused,
-             .status, .order, .receipt, .positions, .notice:
+             .status, .order, .orderCancel, .receipt, .positions, .notice:
             return []   // the leader's own messages from a phone, or files (a squad doesn't take them): ignored
         }
     }
@@ -276,10 +278,12 @@ public struct SquadCore<M: Mission> {
         peers = peers.filter { $0.value != id }   // a rejoin replaces the old link
         peers[peer] = id
         // Orders for this member that it hasn't finished, so a rejoin (or a late joiner) has them.
-        let open = orders.filter { $0.isFor(id) && acks[$0.id]?[id] != .done && acks[$0.id]?[id] != .cannot }.suffix(10)
+        let open = orders.filter { $0.isFor(id) && !cancelled.contains($0.id) && acks[$0.id]?[id] != .done && acks[$0.id]?[id] != .cannot }.suffix(10)
         let known = sharesPositions ? positions.values.filter { $0.member != id }.sorted { $0.time < $1.time } : []
+        // And the ones taken back, in case it was away when they were.
+        let taken = orders.filter { $0.isFor(id) && cancelled.contains($0.id) }.suffix(10)
         return changes + [Outgoing(to: peer, .welcome(Welcome(member: id, squad: squad)))]
-            + open.map { Outgoing(to: peer, .order($0)) } + changed(now: now)
+            + open.map { Outgoing(to: peer, .order($0)) } + taken.map { Outgoing(to: peer, .orderCancel($0.id)) } + changed(now: now)
             + (known.isEmpty ? [] : [Outgoing(to: peer, .positions(PositionsReport(squad: squadID, positions: known)))])
     }
 
@@ -394,6 +398,16 @@ public struct SquadCore<M: Mission> {
         if orders.count > Self.maxOrdersKept { orders.removeFirst(orders.count - Self.maxOrdersKept) }
         let members = peers.filter { order.isFor($0.value) }.map(\.key)
         return (members + Array(observers)).sorted { $0.raw < $1.raw }.map { Outgoing(to: $0, .order(order)) }
+    }
+
+    /// Takes an order back: everyone it was for, and observers, are told it no longer needs
+    /// doing. Answers that arrive after this are ignored. A member who is away hears when they
+    /// are back.
+    public mutating func cancelOrder(_ id: UUID, now: Date) -> [Outgoing] {
+        guard let order = orders.first(where: { $0.id == id }), !cancelled.contains(id) else { return [] }
+        cancelled.insert(id)
+        let members = peers.filter { order.isFor($0.value) }.map(\.key)
+        return (members + Array(observers)).sorted { $0.raw < $1.raw }.map { Outgoing(to: $0, .orderCancel(id)) }
     }
 
     /// Who an order is for, by member.

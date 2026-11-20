@@ -54,6 +54,8 @@ public struct SquadMessage: Equatable, Sendable {
         case refused(String)
         case status(SquadStatus)
         case order(Order)
+        /// The leader took an order back: it no longer needs doing or answering.
+        case orderCancel(UUID)
         /// What the receiver did with a note or a file.
         case receipt(Receipt)
         /// Leader → observers.
@@ -69,6 +71,7 @@ public struct SquadMessage: Equatable, Sendable {
 extension SquadMessage: Codable {
     private enum Keys: String, CodingKey { case v, seq, type, body }
     private struct FileRef: Codable { var file: UUID }
+    private struct OrderRef: Codable { var order: UUID }
     private struct Reason: Codable { var reason: String }
 
     /// The `type` on the wire.
@@ -94,6 +97,7 @@ extension SquadMessage: Codable {
         case .refused: return "refused"
         case .status: return "status"
         case .order: return "order"
+        case .orderCancel: return "orderCancel"
         case .receipt: return "receipt"
         case .positions: return "positions"
         case .mission: return "mission"
@@ -125,6 +129,7 @@ extension SquadMessage: Codable {
         case let .refused(x): try c.encode(Reason(reason: x), forKey: .body)
         case let .status(x): try c.encode(x, forKey: .body)
         case let .order(x): try c.encode(x, forKey: .body)
+        case let .orderCancel(x): try c.encode(OrderRef(order: x), forKey: .body)
         case let .receipt(x): try c.encode(x, forKey: .body)
         case let .positions(x): try c.encode(x, forKey: .body)
         case let .mission(x): try c.encode(x, forKey: .body)
@@ -158,6 +163,7 @@ extension SquadMessage: Codable {
         case "refused": body = .refused(try value(Reason.self).reason)
         case "status": body = .status(try value())
         case "order": body = .order(try value())
+        case "orderCancel": body = .orderCancel(try value(OrderRef.self).order)
         case "receipt": body = .receipt(try value())
         case "positions": body = .positions(try value())
         case "mission": body = .mission(try value())

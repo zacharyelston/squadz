@@ -58,13 +58,14 @@ enum Samples {
                                 missions: [MissionStatus(id: "test.rally", version: 1, payload: Data(#"{"rally":null}"#.utf8))])),
             .order(Order(id: uuid(10), kind: .moveTo, text: "Left flank, by the shed", at: origin, to: [ana.id], time: t)),
             .order(Order(id: uuid(11), kind: Order.Kind(rawValue: "test.rally.regroup"), text: "Regroup", time: t)),
+            .orderCancel(uuid(10)),
             .receipt(Receipt(id: uuid(7), status: .stored, detail: "ok")),
             .positions(PositionsReport(squad: squad.id, positions: [MemberPosition(member: ana.id, at: origin, accuracy: 2, time: t)])),
             .mission(MissionMessage(id: "test.rally", version: 1, payload: Data(#"{"arrived":true}"#.utf8))),
         ]
         for body in all {
             switch body {   // exhaustive on purpose
-            case .link, .seal, .enrolled, .leaderKey, .hello, .bye, .leave, .notice, .position, .orderAck, .checkFire, .note, .fileOffer, .fileChunk, .fileDone,
+            case .link, .seal, .enrolled, .leaderKey, .hello, .bye, .leave, .notice, .orderCancel, .position, .orderAck, .checkFire, .note, .fileOffer, .fileChunk, .fileDone,
                  .welcome, .observing, .refused, .status, .order, .receipt, .positions, .mission: break
             }
         }
