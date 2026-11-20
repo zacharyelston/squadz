@@ -131,6 +131,8 @@ The Swift tests that go through a relay start the one just built, and are skippe
 
 ## Shared geometry and zones
 
+![The commander's map with two zones and the Zones panel beside it](docs/images/commander-zones.png)
+
 The geometry and the zones are part of this repository's Swift package, in [`swift/`](swift): CoreGeo (GPS points and small-area geometry), ZoneKit (circles, polygons and confirmed boundary crossings), and ZoneMapKit (drawing them on a map). Nothing here needs another repository to build. An app that wants them, SpudGunGolf included, depends on this package and takes those products.
 
 The commander can add, label, edit and delete circles or polygons in **Zones**, choose which members they cover, and select goal-arrival or allowed-area-departure alerts. Zone definitions and the latest 50 events are saved with the squad. Enable notification banners from Zones for system alerts. Live monitoring currently requires the squad apps to be open and connected; missing GPS or a disconnected member does not imply a departure.

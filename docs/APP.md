@@ -131,6 +131,18 @@ Orders and notes live in the leader's app while it is running. If the leader's a
 
 **Zones** is a read-only tab on members' phones and an editable panel on the commander's device. Every saved zone is labeled on the map. Circle zones have a centre and a radius in metres; polygon zones are drawn by tapping corners. Edges close automatically. Undo removes the last corner. Save validates the shape, label and selected members; no selection means the whole squad, including the commander.
 
+![The commander's map with two zones and the Zones panel beside it](images/commander-zones.png)
+
+| On a phone's map | The phone's Zones tab | An order into a zone |
+| --- | --- | --- |
+| <img src="images/phone-map-zones.png" width="260" alt="A phone's map in dark mode with a goal circle and an allowed area"> | <img src="images/phone-zones.png" width="260" alt="The read-only list of zones on a phone"> | <img src="images/phone-orders-dark.png" width="260" alt="A move-to order on a phone's Orders tab"> |
+
+Zones stay on the map while the commander gives orders, so a flag can be dropped inside one:
+
+![The commander's Orders panel with a flag inside the Field zone](images/commander-orders-zones.png)
+
+The place in these pictures is made up for the screenshots.
+
 Choose **Goal arrival** to report entry, or **Leave allowed area** to report departure. The commander and the member involved see an in-app alert. **Enable notification banners** requests iOS notification permission; alerts also appear as system banners when permitted. All members can read the latest 50 zone events. Arrival is an observation; it does not complete an order.
 
 Zone definitions and event history survive a leader restart and are included in status on join/reconnect. Old apps ignore the optional fields, so they can still report positions but do not draw zones or show their alerts. Only the leader can change zones.

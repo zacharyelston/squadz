@@ -305,15 +305,20 @@ struct OrderCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .firstTextBaseline) {
-                Label { Text(order.title) } icon: { Image(systemName: "flag.fill").foregroundStyle(model.tone(of: order).color) }
-                    .font(.headline)
+                // The title keeps to one line on a narrow phone; who and when give way first.
+                Image(systemName: "flag.fill").foregroundStyle(model.tone(of: order).color).font(.headline)
+                Text(order.title).font(.headline).lineLimit(1).fixedSize()
                 if isNext {
                     Text("Next").font(.caption.weight(.bold)).padding(.horizontal, 7).padding(.vertical, 2)
                         .background(.orange, in: .capsule).foregroundStyle(.white)
+                        .fixedSize()
                 }
-                Spacer()
+                Spacer(minLength: 4)
                 Text("\(order.to == nil ? "Whole squad" : "You") · \(order.time.formatted(date: .omitted, time: .shortened))")
                     .font(.caption).foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                    .layoutPriority(-1)
             }
             if !order.text.isEmpty, order.kind.appTitle != nil { Text(order.text) }
             if let place = order.at {
