@@ -20,6 +20,13 @@ extension TheaterTests {
         var large = HTTPReader()
         XCTAssertThrowsError(try large.append(Data(repeating: 65, count: 33_000), loopback: true, peer: "127.0.0.1"))
     }
+    func testOnlineMapIsExplicitAndDemoOnly() throws {
+        XCTAssertFalse(try TheaterOptions.parse(["--demo"]).demoMap)
+        XCTAssertTrue(try TheaterOptions.parse(["--demo", "--demo-map"]).demoMap)
+        for args in [["--demo-map"], ["--demo", "--demo-map", "--invite-stdin"], ["--demo", "--demo-map", "--tiles", "/tmp"]] {
+            XCTAssertThrowsError(try TheaterOptions.parse(args))
+        }
+    }
     func testOnlyExplicitLocalBindings() throws {
         for host in ["0.0.0.0", "::", "8.8.8.8", "example.org"] {
             var options = TheaterOptions(); options.bind = host

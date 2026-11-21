@@ -30,9 +30,15 @@ The host exposes no API for orders, answers, notes, position reports, zone edits
 
 ## Try it without phones
 
+For sample members and zones on a real street map:
+
 ```sh
-swift run --package-path theater squadz-theater --demo
+swift run --package-path theater squadz-theater --demo --demo-map
 ```
+
+`--demo-map` loads visible OpenStreetMap raster tiles directly in the browser over HTTPS, with linked attribution and normal browser caching. It needs internet access. It requests only the current viewport, without bulk download or prefetch. The browser sends its origin as Referer, not the squad URL. See the [tile usage policy](https://operations.osmfoundation.org/policies/tiles/).
+
+Online maps are restricted to the two generated sample squads: saved credentials are never loaded, other invites are rejected, and browser pairing is disabled. Normal Theater remains offline. For a fully offline demo, omit `--demo-map` (coordinate grid) or use `--demo --tiles DIRECTORY` with your own tile set.
 
 This creates two labeled, ephemeral sample squads over real encrypted loopback links. Positions move every two seconds. It does not use saved credentials, write to Keychain, or start a camera. The same observer enrollment and browser transport are used as with a phone.
 
@@ -60,7 +66,7 @@ Observer credentials stay in macOS Keychain under `org.squadz.theater.observers`
 
 ## Offline maps
 
-No map provider has been chosen. With no tiles configured, the map explicitly shows a coordinate grid; squad markers and zones still work. It never falls back to internet tiles, geocoding or a CDN.
+No online map provider has been chosen for real squads. The optional `--demo-map` exception above is for generated samples only. With no tiles configured, the map explicitly shows a coordinate grid; squad markers and zones still work. Normal Theater never falls back to internet tiles, geocoding or a CDN.
 
 Supply a directory of Web Mercator **XYZ PNG** tiles (`z/x/y.png`, 256 px) that you are entitled to use:
 

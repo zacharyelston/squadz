@@ -85,6 +85,39 @@ final class ObserverIntegrationTests: XCTestCase {
         XCTAssertNotEqual(controller.snapshot.squads.first?.connection, "removed")
         XCTAssertEqual(room.core.observerRoster.count, 1)
     }
+    func testDemoMapPolicyAndPairingIsolation() async throws {
+        for online in [false, true] {
+            var options = TheaterOptions(); options.port = 0; options.fixture = online; options.demoMap = online
+            let controller = try TheaterController(options: options, persist: false)
+            let server = TheaterHTTPServer(controller: controller)
+            defer { server.stop(); controller.stop() }
+            try server.start(); try await wait("map listener") { server.port != 0 }
+            let base = "http://127.0.0.1:\(server.port)"
+            let (_, response) = try await URLSession.shared.data(from: URL(string: base + "/")!)
+            let http = try XCTUnwrap(response as? HTTPURLResponse)
+            XCTAssertEqual(http.value(forHTTPHeaderField: "Content-Security-Policy")?.contains("https://tile.openstreetmap.org"), online)
+            XCTAssertEqual(http.value(forHTTPHeaderField: "Referrer-Policy"), online ? "origin" : "no-referrer")
+            XCTAssertEqual(controller.snapshot.tiles, online)
+            XCTAssertEqual(controller.snapshot.demoMap, online)
+            if online {
+                var core = SquadCore(squad: Squad(name: "Real squad"), mission: NoMission())
+                let invite = core.openJoining(now: .now).url(scheme: "squadz").absoluteString
+                XCTAssertThrowsError(try controller.join(invite))
+                var request = URLRequest(url: URL(string: base + "/api/join")!)
+                request.httpMethod = "POST"
+                request.setValue(base, forHTTPHeaderField: "Origin")
+                request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                request.setValue("1", forHTTPHeaderField: "X-Theater-Request")
+                request.httpBody = try JSONSerialization.data(withJSONObject: ["invite": invite])
+                let (_, refusal) = try await URLSession.shared.data(for: request)
+                XCTAssertEqual((refusal as? HTTPURLResponse)?.statusCode, 403)
+                let demo = try TheaterDemo(controller: controller)
+                defer { demo.stop() }
+                try await wait("sample squads on online map") { controller.snapshot.squads.count == 2 && controller.snapshot.squads.allSatisfy { $0.connection == "connected" } }
+                XCTAssertEqual(controller.snapshot.tileAttribution, "© OpenStreetMap contributors")
+            }
+        }
+    }
     func testOfflineTilesStayInsideConfiguredDirectory() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }

@@ -68,10 +68,10 @@ Known limits:
 
 ## Theater on a Mac
 
-[Theater](theater/README.md) watches one or more squads as a read-only observer and serves separate Map, Team, Orders, Notes, Zones, Video and Dashboard views for browser windows on multiple monitors. The leader can see and remove observers. It defaults to loopback; explicit LAN access uses a view passcode. Maps use optional local XYZ tiles, with a labeled coordinate grid when none are configured. Video remains leader-only.
+[Theater](theater/README.md) watches one or more squads as a read-only observer and serves separate Map, Team, Orders, Notes, Zones, Video and Dashboard views for browser windows on multiple monitors. The leader can see and remove observers. It defaults to loopback; explicit LAN access uses a view passcode. Maps use optional local XYZ tiles, with a labeled coordinate grid when none are configured. Video remains leader-only. The optional online demo below shows generated sample squads on OpenStreetMap; real squads still use local tiles.
 
 ```sh
-swift run --package-path theater squadz-theater --demo
+swift run --package-path theater squadz-theater --demo --demo-map
 ```
 
 ## Using it

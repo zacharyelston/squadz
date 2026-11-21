@@ -267,7 +267,13 @@
       );
     box.append(grid);
     const pairing = el("section", "pairing");
-    pairing.append(el("h2", "", "Watch another squad"));
+    pairing.append(
+      el(
+        "h2",
+        "",
+        snapshot.demoMap ? "Sample squads only" : "Watch another squad",
+      ),
+    );
     if (access.canManage) {
       pairing.append(
         el(
@@ -315,7 +321,9 @@
         el(
           "p",
           "small muted",
-          "Pair squads on the Mac running the host. This screen can only watch.",
+          snapshot.demoMap
+            ? "Online maps are enabled for these sample squads. Run without --demo-map to join a real squad."
+            : "Pair squads on the Mac running the host. This screen can only watch.",
         ),
       );
     if (snapshot.nearby.length) {
@@ -923,7 +931,12 @@
                 image.bad = true;
                 if (!this.destroyed) this.draw();
               };
-              image.src = "/tiles/" + key + ".png";
+              // Only generated sample squads can enable online demo tiles. Image requests
+              // use the browser cache and send only the origin as Referer, never squad URLs.
+              image.referrerPolicy = "origin";
+              image.src = this.config.demoMap
+                ? "https://tile.openstreetmap.org/" + key + ".png"
+                : "/tiles/" + key + ".png";
               this.images.set(key, image);
               if (this.images.size > 256) {
                 const oldest = this.images.keys().next().value;
@@ -954,9 +967,13 @@
       }
       this.legend.textContent = !this.config.tiles
         ? "No tiles configured · coordinate grid"
-        : missing
-          ? "Local tiles · some tiles unavailable"
-          : "Local offline map";
+        : this.config.demoMap
+          ? missing
+            ? "OpenStreetMap · loading or unavailable tiles"
+            : "OpenStreetMap · online demo"
+          : missing
+            ? "Local tiles · some tiles unavailable"
+            : "Local offline map";
       for (const zone of this.squad.zones) {
         ctx.beginPath();
         if (zone.shape === "circle") {
@@ -1034,14 +1051,20 @@
         ctx.restore();
       });
       const center = this.unproject(this.center);
+      const credit = el(
+        this.config.demoMap ? "a" : "span",
+        "",
+        this.config.tiles
+          ? this.config.tileAttribution
+          : "Coordinate grid · no internet map requests",
+      );
+      if (this.config.demoMap) {
+        credit.href = "https://www.openstreetmap.org/copyright";
+        credit.target = "_blank";
+        credit.rel = "noopener";
+      }
       this.caption.replaceChildren(
-        el(
-          "span",
-          "",
-          this.config.tiles
-            ? this.config.tileAttribution
-            : "Coordinate grid · no internet map requests",
-        ),
+        credit,
         el("span", "", formatCoords(center) + " · zoom " + this.zoom),
       );
       ctx.fillStyle = "#314e3b";

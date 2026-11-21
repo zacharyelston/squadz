@@ -191,7 +191,7 @@ public final class TheaterHTTPServer {
         if request.method == "GET", isPage(path) { resource("index.html", id: id); return }
         guard access.authorized(request) else { respondJSON(id, 401, ["error": "Enter the passcode shown on the Theater host."]); return }
         if request.method == "GET", path == "/api/access" {
-            respondJSON(id, 200, ["canManage": request.loopback]); return
+            respondJSON(id, 200, ["canManage": request.loopback && !controller.options.demoMap]); return
         }
         if request.method == "GET", path == "/api/state" {
             respond(id, 200, "OK", (try? controller.json()) ?? Data("{}".utf8)); return
@@ -210,6 +210,7 @@ public final class TheaterHTTPServer {
         }
         if request.method == "GET", path.hasPrefix("/tiles/") { tile(path, id: id); return }
         if request.method == "POST", path == "/api/join" || path == "/api/forget" {
+            guard !controller.options.demoMap else { respondJSON(id, 403, ["error": "Online demo maps only support sample squads; pairing is disabled."]); return }
             guard request.loopback, access.validMutation(request) else { respondJSON(id, 403, ["error": "Pairing and disconnecting are available only on the host Mac."]); return }
             do {
                 if path == "/api/join" {
@@ -271,7 +272,9 @@ public final class TheaterHTTPServer {
         respond(id, status, status < 400 ? "OK" : "Request failed", (try? JSONSerialization.data(withJSONObject: object)) ?? Data("{}".utf8))
     }
     private func header(_ status: Int, _ reason: String, type: String, length: Int?, extra: [String: String] = [:]) -> String {
-        var lines = ["HTTP/1.1 \(status) \(reason)", "Content-Type: \(type)", "Connection: close", "Cache-Control: \(extra["Cache-Control"] ?? "no-store")", "X-Content-Type-Options: nosniff", "Referrer-Policy: no-referrer", "Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"]
+        let demoMap = controller.options.demoMap
+        let imageSources = demoMap ? "'self' data: https://tile.openstreetmap.org" : "'self' data:"
+        var lines = ["HTTP/1.1 \(status) \(reason)", "Content-Type: \(type)", "Connection: close", "Cache-Control: \(extra["Cache-Control"] ?? "no-store")", "X-Content-Type-Options: nosniff", "Referrer-Policy: \(demoMap ? "origin" : "no-referrer")", "Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src \(imageSources); object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"]
         if let length { lines.append("Content-Length: \(length)") }
         lines += extra.filter { $0.key != "Cache-Control" }.map { "\($0.key): \($0.value)" }; return lines.joined(separator: "\r\n") + "\r\n\r\n"
     }

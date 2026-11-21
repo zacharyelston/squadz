@@ -17,6 +17,7 @@ public struct TheaterOptions {
     public var noHTTP = false
     public var inviteStdin = false
     public var fixture = false
+    public var demoMap = false
     public var endpoint: NWEndpoint?
     public var observerName = "Theater"
     public init() {}
@@ -29,6 +30,9 @@ public struct TheaterOptions {
         return b[0] == 10 || (b[0] == 172 && (16...31).contains(b[1])) || (b[0] == 192 && b[1] == 168) || (b[0] == 169 && b[1] == 254)
     }
     public func validate() throws {
+        guard !demoMap || (fixture && tilesDirectory == nil && !inviteStdin) else {
+            throw TheaterError.message("--demo-map requires --demo and cannot be combined with --tiles or --invite-stdin.")
+        }
         guard Self.localAddress(bind) else { throw TheaterError.message("Bind to loopback or an explicit private/link-local IPv4 address. Wildcard and public listeners are not supported.") }
         guard isLoopback || port > 0 else { throw TheaterError.message("LAN mode needs an explicit nonzero port.") }
         guard (0...22).contains(tileMaxZoom) else { throw TheaterError.message("Tile zoom must be 0 through 22.") }
@@ -56,6 +60,7 @@ public struct TheaterOptions {
             case "--invite-stdin": result.inviteStdin = true
             case "--no-http": result.noHTTP = true
             case "--demo": result.fixture = true
+            case "--demo-map": result.demoMap = true
             case "--endpoint":
                 let text = try value(), parts = text.split(separator: ":")
                 guard parts.count == 2, localAddress(String(parts[0])), let n = UInt16(parts[1]), n > 0,

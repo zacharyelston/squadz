@@ -14,6 +14,7 @@ public final class TheaterDemo {
         rooms = [first, second]
         controller.fixedEndpoint = { [weak self] id in self?.rooms.first { $0.core.squadID == id }?.endpoint }
         for room in rooms {
+            controller.allowDemoSquad(room.core.squadID)
             room.onReady = { [weak room, weak controller] in
                 guard let room else { return }; try? controller?.join(room.invite.url(scheme: "squadz").absoluteString, name: "Theater demo")
             }

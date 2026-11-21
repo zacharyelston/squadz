@@ -21,6 +21,7 @@ struct TheaterMain {
               --tile-max-zoom 18      Deepest tile level (0–22)
               --data-dir DIRECTORY   Nonsecret squad index; observer credentials stay in Keychain
               --demo                  Two labeled sample squads using ephemeral local links
+              --demo-map              With --demo: online OpenStreetMap tiles for samples only
             Pair on http://127.0.0.1:8765/ using an invite from the leader. Open each view in its own window.
             Video stays leader-only. The Theater never sends orders, notes, positions or zone edits.
             """)
@@ -45,6 +46,7 @@ struct TheaterMain {
             }
             controller.start(discover: !options.fixture)
             let demo = options.fixture ? try TheaterDemo(controller: controller) : nil
+            if options.demoMap { print("DEMO MAP: browser loads OpenStreetMap tiles online; real-squad pairing is disabled."); fflush(stdout) }
             if options.fixture { print("DEMO: ephemeral sample squads and positions, not real members."); fflush(stdout) }
             if options.inviteStdin {
                 fputs("Paste the squad invite link, then press Return:\n", stderr)
