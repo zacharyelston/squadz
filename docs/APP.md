@@ -150,3 +150,7 @@ Zone definitions and event history survive a leader restart and are included in 
 Monitoring needs two fresh, distinct reports wholly across the accuracy margin (`max(3 m, accuracy)`). Initial positions, edits, reconnects and gaps longer than two minutes establish a baseline without claiming a crossing. A member who starts outside an allowed area has not been observed leaving it. GPS uncertainty, link loss and stale positions do not produce departure alerts. There is no background-monitoring guarantee: keep the squad apps open and connected for live alerts.
 
 The reusable geometry and map layers are in this repository's Swift package (`swift/Sources/CoreGeo`, `ZoneKit` and `ZoneMapKit`), so another app can use them by depending on it.
+
+## Theater observers
+
+The leader's Team list includes **Observers · read only**, with each issued watcher's name and Watching/Disconnected state. **Remove** revokes that observer credential and disconnects its Theater host. Observers do not occupy member slots or send positions, orders, answers, notes or zone changes. An invite can enroll a Theater observer using the existing invite policy; see [the Mac setup](../theater/README.md).

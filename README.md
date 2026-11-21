@@ -66,6 +66,14 @@ Known limits:
 - Joining is by QR code or invite link. The typed code is in SquadKit but has no screen.
 - No photos yet: notes are text, and the core's capture order has no screen.
 
+## Theater on a Mac
+
+[Theater](theater/README.md) watches one or more squads as a read-only observer and serves separate Map, Team, Orders, Notes, Zones, Video and Dashboard views for browser windows on multiple monitors. The leader can see and remove observers. It defaults to loopback; explicit LAN access uses a view passcode. Maps use optional local XYZ tiles, with a labeled coordinate grid when none are configured. Video remains leader-only. The optional online demo below shows generated sample squads on OpenStreetMap; real squads still use local tiles.
+
+```sh
+swift run --package-path theater squadz-theater --demo --demo-map
+```
+
 ## Using it
 
 ```swift
@@ -83,7 +91,7 @@ func send(_ out: [Outgoing]) {
 }
 host.onOpened = { peer, identity in squad.linkOpened(peer, identity: identity) }
 host.onMessage = { message, peer in send(squad.handle(message, from: peer, now: Date())) }
-host.onPeerClosed = { squad.peerClosed($0) }
+host.onPeerClosed = { send(squad.peerClosed($0)) }
 host.start()
 
 // Open joining and show this as a QR code.

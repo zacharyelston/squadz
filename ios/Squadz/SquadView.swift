@@ -489,28 +489,42 @@ struct MemberList: View {
 
     var body: some View {
         let mine = model.located.first { $0.isMe }?.position?.at
-        List(model.located) { located in
-            VStack(alignment: .leading, spacing: 3) {
-                HStack {
-                    Text(located.member.name)
-                    if located.isMe { Text("you").foregroundStyle(.secondary) }
-                    if located.isLeader {
-                        Image(systemName: "star.fill").foregroundStyle(.yellow).accessibilityLabel("Leader")
+        List {
+            ForEach(model.located) { located in
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack {
+                        Text(located.member.name)
+                        if located.isMe { Text("you").foregroundStyle(.secondary) }
+                        if located.isLeader {
+                            Image(systemName: "star.fill").foregroundStyle(.yellow).accessibilityLabel("Leader")
+                        }
+                        Spacer()
+                        Text(Self.status(located, now: now)).foregroundStyle(.secondary)
                     }
-                    Spacer()
-                    Text(Self.status(located, now: now)).foregroundStyle(.secondary)
+                    let details = Self.details(located, from: mine, showing: MemberDetail.chosen(stored))
+                    if !details.isEmpty {
+                        Text(details.joined(separator: " · "))
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
                 }
-                let details = Self.details(located, from: mine, showing: MemberDetail.chosen(stored))
-                if !details.isEmpty {
-                    Text(details.joined(separator: " · "))
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
+                .opacity(located.isStale(now: now) ? 0.5 : 1)
+                .swipeActions {
+                    if model.role == .leader, !located.isMe {
+                        Button("Remove", role: .destructive) { model.remove(located.id) }
+                    }
                 }
             }
-            .opacity(located.isStale(now: now) ? 0.5 : 1)
-            .swipeActions {
-                if model.role == .leader, !located.isMe {
-                    Button("Remove", role: .destructive) { model.remove(located.id) }
+            if model.role == .leader && !model.watchingObservers.isEmpty {
+                Section("Observers · read only") {
+                    ForEach(model.watchingObservers) { observer in
+                        HStack {
+                            Label(observer.name, systemImage: "eye")
+                            Spacer()
+                            Text(observer.connected ? "Watching" : "Disconnected").foregroundStyle(.secondary)
+                            Button("Remove", role: .destructive) { model.removeObserver(observer) }
+                        }
+                    }
                 }
             }
         }
