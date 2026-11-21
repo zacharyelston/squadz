@@ -181,11 +181,10 @@
     return box;
   }
   function navigation(s, view) {
-    nav.replaceChildren(el("div", "nav-caption", "SQUAD VIEWS"));
-    for (const [key, label, mark] of views) {
-      const a = el("a", "nav-link");
+    nav.replaceChildren();
+    for (const [key, label] of views) {
+      const a = el("a", "nav-link", label);
       a.href = path(s.id, key);
-      a.append(el("span", "mark", mark), el("span", "", label));
       if (view === key) a.setAttribute("aria-current", "page");
       nav.append(a);
     }
